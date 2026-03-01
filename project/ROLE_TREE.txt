@@ -1,0 +1,32 @@
+Role-based Git Tree (PM/PL/Planner/Developer/Tester)
+
+project/
+  pm/
+    inbox/   # incoming requests from user/system
+    outbox/  # PM directives and consolidated reports
+    docs/    # PM artifacts (plan, status, risk)
+  pl/
+    inbox/   # PM tasks for PL
+    outbox/  # PL design/implementation coordination outputs
+    docs/    # technical design, integration decisions
+  planner/
+    inbox/   # PM tasks for planner
+    outbox/  # requirements, AC, scope docs
+    docs/    # product planning artifacts
+  developer/
+    inbox/   # implementation tickets
+    outbox/  # dev completion notes, PR notes
+    docs/    # code-level docs
+  tester/
+    inbox/   # test requests and release candidates
+    outbox/  # test reports and bug lists
+    docs/    # test plans/cases
+  shared/
+    inbox/   # cross-role requests
+    outbox/  # cross-role handoff packages
+    docs/    # shared references
+
+Conventions
+- Task files: TASK-YYYYMMDD-###.json
+- Report files: REPORT-YYYYMMDD-###.json
+- Use JSON for machine-readable handoff between agents.

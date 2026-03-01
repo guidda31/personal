@@ -1,0 +1,11 @@
+{
+  "reportId": "REPORT-YYYYMMDD-001",
+  "role": "pm|pl|planner|developer|tester",
+  "taskId": "TASK-YYYYMMDD-001",
+  "status": "todo|in_progress|blocked|done",
+  "summary": "",
+  "outputs": [],
+  "issues": [],
+  "nextActions": [],
+  "updatedAt": "YYYY-MM-DD HH:mm KST"
+}

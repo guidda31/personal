@@ -1,0 +1,13 @@
+{
+  "taskId": "TASK-YYYYMMDD-001",
+  "fromRole": "pm",
+  "toRole": "pl|planner|developer|tester",
+  "title": "",
+  "objective": "",
+  "inputs": [],
+  "deliverables": [],
+  "acceptanceCriteria": [],
+  "priority": "P0|P1|P2",
+  "due": "YYYY-MM-DD HH:mm KST",
+  "notes": ""
+}
