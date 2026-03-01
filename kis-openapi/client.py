@@ -16,10 +16,19 @@ BASE_URLS = {
 }
 
 TR_IDS = {
-    # 국내주식 현재가 조회
-    # 실전/모의 TR ID는 문서 업데이트에 따라 달라질 수 있음
-    "quote_real": "FHKST01010100",
+    # 시세
+    "quote_real": "FHKST01010100",            # 현재가
     "quote_mock": "FHKST01010100",
+    "orderbook_real": "FHKST01010200",        # 호가
+    "orderbook_mock": "FHKST01010200",
+    "conclusion_real": "FHKST01010300",       # 체결(당일)
+    "conclusion_mock": "FHKST01010300",
+    "daily_real": "FHKST01010400",            # 일봉
+    "daily_mock": "FHKST01010400",
+
+    # 계좌
+    "balance_real": "TTTC8434R",              # 잔고조회
+    "balance_mock": "VTTC8434R",
 }
 
 
@@ -114,24 +123,82 @@ class KISClient:
             "content-type": "application/json; charset=utf-8",
         }
 
-    def get_domestic_quote(self, symbol: str) -> Dict[str, Any]:
-        """
-        국내주식 현재가 조회
-        참고: /uapi/domestic-stock/v1/quotations/inquire-price
-        """
-        path = "/uapi/domestic-stock/v1/quotations/inquire-price"
+    def _get(self, path: str, tr_id_key: str, params: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
+        tr_id = TR_IDS[f"{tr_id_key}_real"] if self.cfg.mode == "real" else TR_IDS[f"{tr_id_key}_mock"]
         url = f"{self.base_url}{path}"
-        tr_id = TR_IDS["quote_real"] if self.cfg.mode == "real" else TR_IDS["quote_mock"]
 
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",  # 주식
-            "FID_INPUT_ISCD": symbol,
-        }
+        last_err: Exception | None = None
+        for i in range(3):
+            try:
+                resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                last_err = e
+                time.sleep(0.4 * (i + 1))
+        raise RuntimeError(f"GET {path} failed after retries: {last_err}")
 
-        resp = requests.get(url, headers=self._headers(tr_id), params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        return data
+    def get_domestic_quote(self, symbol: str) -> Dict[str, Any]:
+        """국내주식 현재가 조회"""
+        return self._get(
+            path="/uapi/domestic-stock/v1/quotations/inquire-price",
+            tr_id_key="quote",
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+        )
+
+    def get_domestic_orderbook(self, symbol: str) -> Dict[str, Any]:
+        """국내주식 호가 조회"""
+        return self._get(
+            path="/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
+            tr_id_key="orderbook",
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+        )
+
+    def get_domestic_conclusion(self, symbol: str) -> Dict[str, Any]:
+        """국내주식 당일 체결 조회"""
+        return self._get(
+            path="/uapi/domestic-stock/v1/quotations/inquire-time-itemconclusion",
+            tr_id_key="conclusion",
+            params={"FID_ETC_CLS_CODE": "", "FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+        )
+
+    def get_domestic_daily(self, symbol: str, period_code: str = "D", adj_price: str = "1") -> Dict[str, Any]:
+        """국내주식 일봉/주봉/월봉 조회 (period_code: D/W/M)"""
+        return self._get(
+            path="/uapi/domestic-stock/v1/quotations/inquire-daily-price",
+            tr_id_key="daily",
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": symbol,
+                "FID_PERIOD_DIV_CODE": period_code,
+                "FID_ORG_ADJ_PRC": adj_price,
+            },
+        )
+
+    def get_balance(self) -> Dict[str, Any]:
+        """국내주식 잔고 조회"""
+        if not self.cfg.account_no or "-" not in self.cfg.account_no:
+            raise RuntimeError("KIS_ACCOUNT_NO must be set like 12345678-01")
+        cano, acnt_prdt_cd = self.cfg.account_no.split("-", 1)
+
+        return self._get(
+            path="/uapi/domestic-stock/v1/trading/inquire-balance",
+            tr_id_key="balance",
+            params={
+                "CANO": cano,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "AFHR_FLPR_YN": "N",
+                "OFL_YN": "",
+                "INQR_DVSN": "02",
+                "UNPR_DVSN": "01",
+                "FUND_STTL_ICLD_YN": "N",
+                "FNCG_AMT_AUTO_RDPT_YN": "N",
+                "PRCS_DVSN": "01",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+            },
+            timeout=12,
+        )
 
 
 
