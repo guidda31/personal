@@ -1,5 +1,6 @@
 {
   "timezone": "Asia/Seoul",
+  "risk_profile": "neutral",
   "auto_recommend": true,
   "auto_count": 50,
   "target_pct": 7.0,
