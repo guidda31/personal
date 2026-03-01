@@ -33,11 +33,12 @@ def cpu_percent(interval=0.5):
 
 
 def get_gpu_power_watts():
-    if not shutil.which('nvidia-smi'):
+    smi = shutil.which('nvidia-smi') or '/usr/lib/wsl/lib/nvidia-smi'
+    if not os.path.exists(smi):
         return None
     try:
         out = subprocess.check_output(
-            ['nvidia-smi', '--query-gpu=power.draw', '--format=csv,noheader,nounits'],
+            [smi, '--query-gpu=power.draw', '--format=csv,noheader,nounits'],
             stderr=subprocess.DEVNULL,
             text=True,
             timeout=2,
