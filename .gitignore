@@ -1,3 +1,9 @@
 # Ignore all Markdown files
 *.md
 **/*.md
+
+# Ignore environment files
+.env
+**/.env
+.env.*
+**/.env.*
