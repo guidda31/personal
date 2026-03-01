@@ -6,7 +6,7 @@ _Learn about the person you're helping. Update this as you go._
 - **What to call them:** 구이따
 - **Pronouns:** _(optional)_
 - **Timezone:** Asia/Seoul
-- **Notes:** 첫 인사 완료 (2026-03-01). 유튜브 인기 요약 포맷 선호: Shorts 제외, 국내 채널만, 조회수/업로드시간 포함 (2026-03-01).
+- **Notes:** 첫 인사 완료 (2026-03-01). 유튜브 인기 요약 포맷 선호: Shorts 제외, 국내 채널만, 조회수/업로드시간 포함 (2026-03-01). 투자 성향: 중립 (2026-03-01).
 
 ## Context
 
