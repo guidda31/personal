@@ -89,15 +89,16 @@ def save_state(state: dict):
 
 
 def pick_top_symbol(client: KISClient) -> tuple[str, float, dict]:
-    # simplistic momentum score from quote fields
+    # dynamic shortlist from top-volume universe
+    symbols = top_volume_symbols(limit=30)
     best = ("", -999.0, {})
-    for s in CANDIDATES:
+    for s in symbols:
         d = client.get_domestic_quote(s)
         o = d.get("output", {})
         try:
             rate = float(o.get("prdy_ctrt", "0"))
             vol_rate = float(o.get("prdy_vrss_vol_rate", "0"))
-            score = rate * 0.7 + (vol_rate / 100.0) * 0.3
+            score = rate * 0.65 + (vol_rate / 100.0) * 0.35
         except Exception:
             continue
         if score > best[1]:
@@ -129,16 +130,16 @@ def run_once(dry_run: bool, confirm: str | None):
         cash = int((b.get("output2") or [{}])[0].get("dnca_tot_amt", "0"))
         qty = calc_qty(cash, price)
 
-        log_event("select", {"symbol": symbol, "score": score, "price": price, "cash": cash, "qty": qty})
+        log_event("select", {"symbol": symbol, "score": score, "price": price, "cash": cash, "qty": qty}, notify=True)
 
         if qty > 0:
             if dry_run:
-                log_event("buy_dry_run", {"symbol": symbol, "qty": qty, "price": price})
+                log_event("buy_dry_run", {"symbol": symbol, "qty": qty, "price": price}, notify=True)
             else:
                 if cfg.mode == "real" and confirm != "REAL_ORDER":
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_buy(symbol=symbol, qty=qty, price=price, ord_dvsn="00")
-                log_event("buy_submitted", {"symbol": symbol, "qty": qty, "price": price, "result": res})
+                log_event("buy_submitted", {"symbol": symbol, "qty": qty, "price": price, "result": res}, notify=True)
             state.update({"entered": True, "symbol": symbol, "qty": qty, "avg_price": price})
             save_state(state)
 
@@ -156,12 +157,12 @@ def run_once(dry_run: bool, confirm: str | None):
             # stop loss -10%
             if pnl <= -10.0:
                 if dry_run:
-                    log_event("stoploss_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur})
+                    log_event("stoploss_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur}, notify=True)
                 else:
                     if cfg.mode == "real" and confirm != "REAL_ORDER":
                         raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                     res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=cur, ord_dvsn="00")
-                    log_event("stoploss_sell", {"result": res})
+                    log_event("stoploss_sell", {"result": res}, notify=True)
                 state.update({"entered": False, "qty": 0})
                 save_state(state)
 
