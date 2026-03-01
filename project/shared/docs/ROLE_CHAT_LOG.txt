@@ -1,0 +1,20 @@
+[ROLE CHAT LOG]
+- This file stores role-to-role conversation logs (PM/PL/Planner/Developer/Tester).
+- Append new conversation entries in real-time for inclusion in daily dumps.
+
+Format:
+[YYYY-MM-DD HH:MM:SS KST] FROM -> TO
+MESSAGE
+---
+[2026-03-01 22:08:47 KST] PM -> PL
+Phase2 주문 기능 즉시 착수. buy/sell/orders/cancel + real 주문 확인 가드 포함 설계 고정.
+---
+[2026-03-01 22:08:47 KST] PL -> Developer
+client.py 주문 TR ID/POST 공통 호출기, main.py 주문 CLI 추가 진행.
+---
+[2026-03-01 22:08:47 KST] Developer -> Tester
+주문 기능 반영 완료. dry-run 및 confirm 가드 포함. 검증 요청.
+---
+[2026-03-01 22:08:47 KST] Tester -> PM
+시세/계좌 PASS. 장외 실주문은 APBK0919. 취소는 유효 주문번호 필요(APBK0344).
+---

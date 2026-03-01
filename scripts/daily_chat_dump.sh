@@ -24,9 +24,19 @@ mkdir -p "$OUT_DIR"
 
   echo
   echo "=================================================="
-  echo "2) 프로젝트 역할 리포트(outbox)"
+  echo "2) 프로젝트 역할 대화 로그"
   echo "=================================================="
-  find "$REPO/project" -type f -path '*/outbox/*' -name '*.json' | sort | while read -r f; do
+  if [[ -f "$REPO/project/shared/docs/ROLE_CHAT_LOG.txt" ]]; then
+    cat "$REPO/project/shared/docs/ROLE_CHAT_LOG.txt"
+  else
+    echo "- ROLE_CHAT_LOG.txt 없음"
+  fi
+
+  echo
+  echo "=================================================="
+  echo "3) 프로젝트 역할 산출물(inbox/outbox)"
+  echo "=================================================="
+  find "$REPO/project" -type f \( -path '*/outbox/*' -o -path '*/inbox/*' \) -name '*.json' | sort | while read -r f; do
     echo
     echo "- 파일: ${f#$REPO/}"
     if command -v jq >/dev/null 2>&1; then
@@ -38,7 +48,7 @@ mkdir -p "$OUT_DIR"
 
   echo
   echo "=================================================="
-  echo "3) Git 변경 요약(최근 커밋 20개)"
+  echo "4) Git 변경 요약(최근 커밋 20개)"
   echo "=================================================="
   git -C "$REPO" log --oneline -n 20 || true
 
