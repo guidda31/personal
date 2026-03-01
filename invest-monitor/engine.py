@@ -148,7 +148,40 @@ def sigmoid(x: float) -> float:
     return 1 / (1 + math.exp(-x))
 
 
-def probability_score(bars_latest_first: list[DailyBar], usdkrw: float | None = None, usdkrw_chg_text: str | None = None) -> tuple[float, dict]:
+def classify_theme(name: str) -> str:
+    n = name.upper()
+    themes = {
+        "defense": ["한화", "LIG", "현대로템", "풍산", "방산"],
+        "energy": ["S-OIL", "SK이노", "GS", "정유", "가스", "에너지"],
+        "semiconductor": ["삼성전자", "SK하이닉스", "한미반도체", "반도체"],
+        "bio": ["바이오", "셀트리온", "삼성바이오", "젠큐릭스"],
+        "finance": ["금융", "은행", "증권", "우리금융", "KB", "신한", "하나"],
+        "construction": ["건설", "대우건설", "현대건설", "GS건설"],
+    }
+    for k, kws in themes.items():
+        if any(kw.upper() in n for kw in kws):
+            return k
+    return "general"
+
+
+def theme_factor(theme: str, fx_delta: float | None) -> float:
+    # Risk-off day heuristic: weak KRW favors defense/energy, penalizes high-beta growth.
+    if fx_delta is None:
+        return 0.0
+    if fx_delta > 8:
+        if theme in {"defense", "energy"}:
+            return 0.12
+        if theme in {"bio"}:
+            return -0.08
+    return 0.0
+
+
+def probability_score(
+    bars_latest_first: list[DailyBar],
+    name: str = "",
+    usdkrw: float | None = None,
+    usdkrw_chg_text: str | None = None,
+) -> tuple[float, dict]:
     closes = [b.close for b in bars_latest_first]
     vols = [b.volume for b in bars_latest_first]
     cur = closes[0]
@@ -161,6 +194,7 @@ def probability_score(bars_latest_first: list[DailyBar], usdkrw: float | None = 
 
     # FX penalty for KRW weakness shock days
     fx_penalty = 0.0
+    fx_delta = None
     if usdkrw_chg_text:
         m = re.search(r'([+-]?[0-9]+\.?[0-9]*)', usdkrw_chg_text.replace(',', ''))
         if m:
@@ -171,18 +205,24 @@ def probability_score(bars_latest_first: list[DailyBar], usdkrw: float | None = 
             except Exception:
                 pass
 
+    th = classify_theme(name)
+    th_adj = theme_factor(th, fx_delta)
+
     # Heuristic logit model (interpretable, not overfit)
     z = (
-        0.10 * mom_3
-        + 0.08 * mom_5
-        + 0.04 * mom_20
-        + 0.35 * math.log(max(vol_ratio, 0.2))
-        + (0.15 if 45 <= rsi <= 62 else (-0.12 if rsi > 75 else 0.0))
+        0.08 * mom_3
+        + 0.07 * mom_5
+        + 0.03 * mom_20
+        + 0.28 * math.log(max(vol_ratio, 0.2))
+        + (0.12 if 42 <= rsi <= 64 else (-0.18 if rsi > 78 else 0.0))
         - fx_penalty
+        + th_adj
     )
 
-    # Calibration: soften confidence to avoid saturated 0/100 outputs.
-    prob = sigmoid(z / 3.0) * 100
+    # Calibration: soften confidence and cap overheat zone.
+    raw_prob = sigmoid(z / 3.5) * 100
+    prob = min(88.0, max(12.0, raw_prob))
+
     details = {
         "mom_3": round(mom_3, 2),
         "mom_5": round(mom_5, 2),
@@ -190,31 +230,60 @@ def probability_score(bars_latest_first: list[DailyBar], usdkrw: float | None = 
         "rsi14": round(rsi, 2),
         "vol_ratio": round(vol_ratio, 2),
         "fx_penalty": fx_penalty,
+        "theme": th,
+        "theme_adj": round(th_adj, 3),
     }
     return round(prob, 2), details
 
 
-def target_stop_from_atr(cur: float, atr: float, style: str = "neutral") -> tuple[int, int]:
+def target_stop_from_atr(cur: float, atr: float, style: str = "neutral") -> tuple[int, int, str]:
     style = style.lower()
+
+    # Volatility regime by ATR ratio
+    atr_ratio = atr / max(cur, 1)
+    if atr_ratio >= 0.08:
+        regime = "high"
+    elif atr_ratio >= 0.04:
+        regime = "mid"
+    else:
+        regime = "low"
+
     if style == "aggressive":
-        t_mult, s_mult = 2.2, 1.4
+        base_t, base_s = 2.2, 1.4
     elif style == "conservative":
-        t_mult, s_mult = 1.2, 0.9
+        base_t, base_s = 1.2, 0.9
     else:  # neutral
-        t_mult, s_mult = 1.7, 1.1
+        base_t, base_s = 1.7, 1.1
+
+    # Dynamic adjustment by regime
+    if regime == "high":
+        t_mult = base_t * 1.25
+        s_mult = base_s * 1.20
+    elif regime == "mid":
+        t_mult = base_t * 1.0
+        s_mult = base_s * 1.0
+    else:  # low
+        t_mult = base_t * 0.85
+        s_mult = base_s * 0.80
+
     target = int(round(cur + atr * t_mult))
     stop = int(round(max(1, cur - atr * s_mult)))
-    return target, stop
+    return target, stop, regime
 
 
-def scenario_label(prob: float, rsi: float, vol_ratio: float) -> str:
+def scenario_label(prob: float, rsi: float, vol_ratio: float, regime: str, theme: str) -> str:
+    base = ""
     if prob >= 66 and vol_ratio >= 1.2 and rsi < 72:
-        return "상승 모멘텀 우세"
-    if prob >= 55:
-        return "중립~상승 시도"
-    if prob >= 45:
-        return "박스권/혼조 가능"
-    return "변동성 주의(보수 접근)"
+        base = "상승 모멘텀 우세"
+    elif prob >= 55:
+        base = "중립~상승 시도"
+    elif prob >= 45:
+        base = "박스권/혼조 가능"
+    else:
+        base = "변동성 주의(보수 접근)"
+
+    regime_txt = {"high": "고변동", "mid": "중변동", "low": "저변동"}.get(regime, "중변동")
+    return f"{base} · {regime_txt} · {theme}"
 
 
 def now_kst() -> str:

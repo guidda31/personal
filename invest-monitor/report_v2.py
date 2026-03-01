@@ -47,8 +47,8 @@ def main() -> None:
             continue
         cur = bars[0].close
         atr = atr_14(bars)
-        prob, details = probability_score(bars, fx, fx_chg)
-        target, stop = target_stop_from_atr(cur, atr, style=risk)
+        prob, details = probability_score(bars, name=c["name"], usdkrw=fx, usdkrw_chg_text=fx_chg)
+        target, stop, regime = target_stop_from_atr(cur, atr, style=risk)
         scored.append(
             {
                 **c,
@@ -59,6 +59,7 @@ def main() -> None:
                 "up_pct": round(percent(target, cur), 2),
                 "down_pct": round(percent(stop, cur), 2),
                 "details": details,
+                "regime": regime,
             }
         )
 
@@ -78,10 +79,10 @@ def main() -> None:
         print(f"   - 상승확률 점수: {s['prob']:.2f}%")
         print(f"   - 목표가: {s['target']:,}원 ({s['up_pct']:+.2f}%)")
         print(f"   - 손절가: {s['stop']:,}원 ({s['down_pct']:+.2f}%)")
-        print(f"   - 시나리오: {scenario_label(s['prob'], d['rsi14'], d['vol_ratio'])}")
+        print(f"   - 시나리오: {scenario_label(s['prob'], d['rsi14'], d['vol_ratio'], s['regime'], d['theme'])}")
         print(
             f"   - 근거: mom3 {d['mom_3']:+.2f}%, mom5 {d['mom_5']:+.2f}%, "
-            f"RSI {d['rsi14']:.1f}, 거래량비 {d['vol_ratio']:.2f}x"
+            f"RSI {d['rsi14']:.1f}, 거래량비 {d['vol_ratio']:.2f}x, 테마보정 {d['theme_adj']:+.3f}"
         )
 
 
