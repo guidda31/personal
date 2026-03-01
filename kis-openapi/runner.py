@@ -47,6 +47,8 @@ def fetch_text(url: str, encoding: str = "euc-kr") -> str:
 def top_volume_symbols(limit: int = 30) -> list[str]:
     out = []
     etf_kw = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "ETN", "레버리지", "인버스"]
+    # basic KRX hygiene filters by name
+    bad_name_kw = ["스팩", "SPAC", "우", "우B", "우선주", "관리", "정리매매", "거래정지"]
     for sosok in ("0", "1"):
         html = fetch_text(f"https://finance.naver.com/sise/sise_quant.naver?sosok={sosok}")
         for tr in re.findall(r"<tr>(.*?)</tr>", html, re.S):
@@ -54,7 +56,10 @@ def top_volume_symbols(limit: int = 30) -> list[str]:
             if not m:
                 continue
             code, name = m.group(1), unescape(m.group(2)).strip()
-            if any(k.upper() in name.upper() for k in etf_kw):
+            u = name.upper()
+            if any(k.upper() in u for k in etf_kw):
+                continue
+            if any(k.upper() in u for k in bad_name_kw):
                 continue
             out.append(code)
             if len(out) >= limit:
@@ -88,13 +93,38 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def is_tradeable_quote(o: dict) -> tuple[bool, str]:
+    # KIS fields may vary by account/product; use defensive checks
+    warn = ""
+    st = str(o.get("trht_yn", "")).upper()  # trading halt flag (Y/N in some APIs)
+    if st == "Y":
+        return False, "거래정지"
+
+    # risk/admin indicators (field names can vary; inspect if present)
+    for k in ("mrkt_warn_cls_code", "iscd_stat_cls_code", "temp_stop_yn"):
+        v = str(o.get(k, "")).strip().upper()
+        if v and v not in {"0", "N", "NONE"}:
+            return False, f"risk_flag:{k}={v}"
+
+    cur = int(o.get("stck_prpr", "0") or 0)
+    prev_close = int(o.get("stck_sdpr", "0") or 0)
+    if cur <= 0 or prev_close <= 0:
+        return False, "invalid_price"
+
+    return True, warn
+
+
 def pick_top_symbol(client: KISClient) -> tuple[str, float, dict]:
-    # dynamic shortlist from top-volume universe
-    symbols = top_volume_symbols(limit=30)
+    # dynamic shortlist from top-volume universe + tradeability filters
+    symbols = top_volume_symbols(limit=50)
     best = ("", -999.0, {})
     for s in symbols:
         d = client.get_domestic_quote(s)
         o = d.get("output", {})
+        ok, reason = is_tradeable_quote(o)
+        if not ok:
+            log_event("candidate_skip", {"symbol": s, "reason": reason})
+            continue
         try:
             rate = float(o.get("prdy_ctrt", "0"))
             vol_rate = float(o.get("prdy_vrss_vol_rate", "0"))
@@ -162,6 +192,10 @@ def run_once(dry_run: bool, confirm: str | None):
     # 1) Entry window (09:01~10:00, continuous session only)
     if not state["entered"] and dt.time(9, 1) <= t <= dt.time(10, 0) and is_continuous_session(t):
         symbol, score, q = pick_top_symbol(client)
+        if not symbol:
+            log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
+            return
+
         raw_price = int(q.get("stck_prpr", "0") or 0)
         prev_close = int(q.get("stck_sdpr", "0") or 0)
         price = clamp_order_price_by_krx_limit(raw_price, prev_close)
