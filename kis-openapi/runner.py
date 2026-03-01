@@ -169,12 +169,12 @@ def run_once(dry_run: bool, confirm: str | None):
         # force close 15:15+
         if state["entered"] and t >= dt.time(15, 15):
             if dry_run:
-                log_event("eod_close_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur})
+                log_event("eod_close_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur}, notify=True)
             else:
                 if cfg.mode == "real" and confirm != "REAL_ORDER":
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=cur, ord_dvsn="00")
-                log_event("eod_close_sell", {"result": res})
+                log_event("eod_close_sell", {"result": res}, notify=True)
             state.update({"entered": False, "qty": 0})
             save_state(state)
 
@@ -195,10 +195,17 @@ def main():
 
     if args.loop:
         while True:
-            run_once(dry_run=args.dry_run, confirm=args.confirm)
+            try:
+                run_once(dry_run=args.dry_run, confirm=args.confirm)
+            except Exception as e:
+                log_event("error", {"message": str(e)}, notify=True)
             time.sleep(30)
     else:
-        run_once(dry_run=args.dry_run, confirm=args.confirm)
+        try:
+            run_once(dry_run=args.dry_run, confirm=args.confirm)
+        except Exception as e:
+            log_event("error", {"message": str(e)}, notify=True)
+            raise
 
 
 if __name__ == "__main__":
