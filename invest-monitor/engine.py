@@ -208,21 +208,27 @@ def probability_score(
     th = classify_theme(name)
     th_adj = theme_factor(th, fx_delta)
 
+    overheat_penalty = 0.0
+    if rsi > 82:
+        overheat_penalty += 0.20
+    if mom_5 > 35:
+        overheat_penalty += 0.20
+
     # Heuristic logit model (interpretable, not overfit)
     z = (
-        0.08 * mom_3
-        + 0.07 * mom_5
-        + 0.03 * mom_20
-        + 0.28 * math.log(max(vol_ratio, 0.2))
-        + (0.12 if 42 <= rsi <= 64 else (-0.18 if rsi > 78 else 0.0))
+        0.06 * mom_3
+        + 0.05 * mom_5
+        + 0.025 * mom_20
+        + 0.22 * math.log(max(vol_ratio, 0.2))
+        + (0.10 if 42 <= rsi <= 64 else (-0.22 if rsi > 78 else 0.0))
         - fx_penalty
+        - overheat_penalty
         + th_adj
     )
 
-    # Calibration: soften confidence and cap overheat zone.
-    raw_prob = sigmoid(z / 3.5) * 100
-    prob = min(88.0, max(12.0, raw_prob))
-
+    # Calibration: soften confidence and avoid 99% saturation.
+    raw_prob = sigmoid(z / 4.8) * 100
+    prob = min(82.0, max(18.0, raw_prob))
     details = {
         "mom_3": round(mom_3, 2),
         "mom_5": round(mom_5, 2),
@@ -232,6 +238,7 @@ def probability_score(
         "fx_penalty": fx_penalty,
         "theme": th,
         "theme_adj": round(th_adj, 3),
+        "overheat_penalty": round(overheat_penalty, 3),
     }
     return round(prob, 2), details
 
