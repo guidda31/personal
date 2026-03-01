@@ -29,6 +29,16 @@ TR_IDS = {
     # 계좌
     "balance_real": "TTTC8434R",              # 잔고조회
     "balance_mock": "VTTC8434R",
+
+    # 주문 (현금)
+    "buy_real": "TTTC0802U",
+    "buy_mock": "VTTC0802U",
+    "sell_real": "TTTC0801U",
+    "sell_mock": "VTTC0801U",
+    "order_inquire_real": "TTTC8001R",
+    "order_inquire_mock": "VTTC8001R",
+    "cancel_real": "TTTC0803U",
+    "cancel_mock": "VTTC0803U",
 }
 
 
@@ -175,11 +185,29 @@ class KISClient:
             },
         )
 
-    def get_balance(self) -> Dict[str, Any]:
-        """국내주식 잔고 조회"""
+    def _post(self, path: str, tr_id_key: str, body: Dict[str, Any], timeout: int = 10) -> Dict[str, Any]:
+        tr_id = TR_IDS[f"{tr_id_key}_real"] if self.cfg.mode == "real" else TR_IDS[f"{tr_id_key}_mock"]
+        url = f"{self.base_url}{path}"
+
+        last_err: Exception | None = None
+        for i in range(3):
+            try:
+                resp = requests.post(url, headers=self._headers(tr_id), json=body, timeout=timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                last_err = e
+                time.sleep(0.4 * (i + 1))
+        raise RuntimeError(f"POST {path} failed after retries: {last_err}")
+
+    def _account_split(self) -> tuple[str, str]:
         if not self.cfg.account_no or "-" not in self.cfg.account_no:
             raise RuntimeError("KIS_ACCOUNT_NO must be set like 12345678-01")
-        cano, acnt_prdt_cd = self.cfg.account_no.split("-", 1)
+        return self.cfg.account_no.split("-", 1)
+
+    def get_balance(self) -> Dict[str, Any]:
+        """국내주식 잔고 조회"""
+        cano, acnt_prdt_cd = self._account_split()
 
         return self._get(
             path="/uapi/domestic-stock/v1/trading/inquire-balance",
@@ -196,6 +224,86 @@ class KISClient:
                 "PRCS_DVSN": "01",
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
+            },
+            timeout=12,
+        )
+
+    def order_cash_buy(self, symbol: str, qty: int, price: int, ord_dvsn: str = "00") -> Dict[str, Any]:
+        """국내주식 현금 매수 주문. ord_dvsn: 00 지정가, 01 시장가"""
+        cano, acnt_prdt_cd = self._account_split()
+        return self._post(
+            path="/uapi/domestic-stock/v1/trading/order-cash",
+            tr_id_key="buy",
+            body={
+                "CANO": cano,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "PDNO": symbol,
+                "ORD_DVSN": ord_dvsn,
+                "ORD_QTY": str(qty),
+                "ORD_UNPR": str(price),
+            },
+            timeout=12,
+        )
+
+    def order_cash_sell(self, symbol: str, qty: int, price: int, ord_dvsn: str = "00") -> Dict[str, Any]:
+        """국내주식 현금 매도 주문. ord_dvsn: 00 지정가, 01 시장가"""
+        cano, acnt_prdt_cd = self._account_split()
+        return self._post(
+            path="/uapi/domestic-stock/v1/trading/order-cash",
+            tr_id_key="sell",
+            body={
+                "CANO": cano,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "PDNO": symbol,
+                "ORD_DVSN": ord_dvsn,
+                "ORD_QTY": str(qty),
+                "ORD_UNPR": str(price),
+            },
+            timeout=12,
+        )
+
+    def inquire_orders(self, inqr_strt_dt: str, inqr_end_dt: str, side: str = "00") -> Dict[str, Any]:
+        """당일/기간 주문 조회. side: 00 전체, 01 매도, 02 매수"""
+        cano, acnt_prdt_cd = self._account_split()
+        return self._get(
+            path="/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+            tr_id_key="order_inquire",
+            params={
+                "CANO": cano,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "INQR_STRT_DT": inqr_strt_dt,
+                "INQR_END_DT": inqr_end_dt,
+                "SLL_BUY_DVSN_CD": side,
+                "INQR_DVSN": "00",
+                "PDNO": "",
+                "CCLD_DVSN": "00",
+                "ORD_GNO_BRNO": "",
+                "ODNO": "",
+                "INQR_DVSN_3": "00",
+                "INQR_DVSN_1": "",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+            },
+            timeout=12,
+        )
+
+    def cancel_order(self, orgn_odno: str, symbol: str, qty: int, price: int = 0, ord_dvsn: str = "00") -> Dict[str, Any]:
+        """정정/취소 중 취소 요청(기본)."""
+        cano, acnt_prdt_cd = self._account_split()
+        return self._post(
+            path="/uapi/domestic-stock/v1/trading/order-rvsecncl",
+            tr_id_key="cancel",
+            body={
+                "CANO": cano,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "KRX_FWDG_ORD_ORGNO": "",
+                "ORGN_ODNO": orgn_odno,
+                "ORD_DVSN": ord_dvsn,
+                "RVSE_CNCL_DVSN_CD": "02",
+                "ORD_QTY": str(qty),
+                "ORD_UNPR": str(price),
+                "QTY_ALL_ORD_YN": "N",
+                "PDNO": symbol,
             },
             timeout=12,
         )
