@@ -27,7 +27,7 @@ class KISConfig:
     mode: str
     app_key: str
     app_secret: str
-    account_no: str
+    account_no: str = ""
     token_cache: str = ".kis_token.json"
 
 
@@ -133,7 +133,6 @@ def load_config_from_env() -> KISConfig:
     missing = [k for k, v in {
         "KIS_APP_KEY": app_key,
         "KIS_APP_SECRET": app_secret,
-        "KIS_ACCOUNT_NO": account_no,
     }.items() if not v]
 
     if missing:
