@@ -18,8 +18,11 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import time
+from html import unescape
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 try:
     from dotenv import load_dotenv
@@ -27,24 +30,52 @@ except Exception:
     load_dotenv = None
 
 from client import KISClient, load_config_from_env
+from notifier import send_telegram
 
 STATE_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_state.json")
 
-# For initial implementation, static shortlist (replace with screener in next sprint)
-CANDIDATES = ["005930", "000660", "035420", "051910", "207940", "068270"]
+UA = "Mozilla/5.0"
+
+
+def fetch_text(url: str, encoding: str = "euc-kr") -> str:
+    req = Request(url, headers={"User-Agent": UA})
+    with urlopen(req, timeout=10) as r:
+        b = r.read()
+    return b.decode(encoding, "ignore")
+
+
+def top_volume_symbols(limit: int = 30) -> list[str]:
+    out = []
+    etf_kw = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "ETN", "레버리지", "인버스"]
+    for sosok in ("0", "1"):
+        html = fetch_text(f"https://finance.naver.com/sise/sise_quant.naver?sosok={sosok}")
+        for tr in re.findall(r"<tr>(.*?)</tr>", html, re.S):
+            m = re.search(r'<a href="/item/main\.naver\?code=(\d+)" class="tltle">([^<]+)</a>', tr)
+            if not m:
+                continue
+            code, name = m.group(1), unescape(m.group(2)).strip()
+            if any(k.upper() in name.upper() for k in etf_kw):
+                continue
+            out.append(code)
+            if len(out) >= limit:
+                return out
+    return out
 
 
 def now_kst() -> dt.datetime:
     return dt.datetime.now()
 
 
-def log_event(kind: str, payload: dict):
+def log_event(kind: str, payload: dict, notify: bool = False):
     row = {
         "ts": now_kst().strftime("%Y-%m-%d %H:%M:%S KST"),
         "kind": kind,
         "payload": payload,
     }
-    print(json.dumps(row, ensure_ascii=False))
+    line = json.dumps(row, ensure_ascii=False)
+    print(line)
+    if notify:
+        send_telegram(f"[KIS-AUTO] {kind}\n{json.dumps(payload, ensure_ascii=False)}")
 
 
 def load_state() -> dict:
