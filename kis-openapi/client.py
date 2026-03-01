@@ -55,11 +55,11 @@ class KISClient:
             return None
         return None
 
-    def _save_cached_token(self, token: str, expires_in: int):
+    def _save_cached_token(self, token: str, expires_at_epoch: int):
         p = self._cache_path()
         payload = {
             "access_token": token,
-            "expires_at": int(time.time()) + int(expires_in),
+            "expires_at": int(expires_at_epoch),
         }
         p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -88,7 +88,18 @@ class KISClient:
             raise RuntimeError(f"Token issue failed: {data}")
 
         expires_in = int(data.get("expires_in", 86400))
-        self._save_cached_token(token, expires_in)
+
+        # Prefer explicit expiry timestamp from API doc: access_token_token_expired
+        expires_at_epoch = int(time.time()) + expires_in
+        expired_at_text = data.get("access_token_token_expired")
+        if expired_at_text:
+            try:
+                dt = datetime.strptime(expired_at_text, "%Y-%m-%d %H:%M:%S")
+                expires_at_epoch = int(dt.timestamp())
+            except Exception:
+                pass
+
+        self._save_cached_token(token, expires_at_epoch)
         self._token = token
         return token
 
