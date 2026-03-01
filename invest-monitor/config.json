@@ -1,0 +1,33 @@
+{
+  "timezone": "Asia/Seoul",
+  "symbols": [
+    {
+      "name": "우리금융지주",
+      "code": "316140",
+      "market": "KOSPI",
+      "target_price": 17500,
+      "stop_price": 14600
+    },
+    {
+      "name": "삼성전자",
+      "code": "005930",
+      "market": "KOSPI",
+      "target_price": 86000,
+      "stop_price": 72000
+    },
+    {
+      "name": "SK하이닉스",
+      "code": "000660",
+      "market": "KOSPI",
+      "target_price": 265000,
+      "stop_price": 210000
+    },
+    {
+      "name": "NAVER",
+      "code": "035420",
+      "market": "KOSPI",
+      "target_price": 260000,
+      "stop_price": 200000
+    }
+  ]
+}
