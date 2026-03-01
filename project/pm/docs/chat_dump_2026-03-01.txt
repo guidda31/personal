@@ -1,5 +1,5 @@
 [자동 대화 덤프] 2026-03-01 (Asia/Seoul)
-생성시각: 2026-03-01 22:08:56 KST
+생성시각: 2026-03-01 23:58:01 KST
 
 ==================================================
 1) 당일 메모
@@ -13,6 +13,15 @@
 - User asked to remember: prefer using the `stock` skill context/decision from this conversation (2026-03-01).
 - Update: user removed the `stock` skill and asked to remember this state (2026-03-01).
 - User preference: investment risk profile is neutral (중립) (2026-03-01).
+- User requested PM-style multi-role workflow (PM/PL/Planner/Developer/Tester): PM coordinates only, assigns tasks by role, and reports consolidated results (2026-03-01).
+- Project role tree created at `project/{pm,pl,planner,developer,tester,shared}` with inbox/outbox/docs convention and JSON task/report templates (2026-03-01).
+- KIS OpenAPI program scaffold created under `kis-openapi/` and extended to support: quote, orderbook, conclusion, daily, balance, plus order-related CLI commands (buy/sell/orders/cancel) with real-order confirm guard (2026-03-01).
+- Confirmed real account number for testing: `69296751-01` (sensitive; do not expose broadly). Real balance query works when `KIS_MODE=real` (2026-03-01).
+- User wants day-trading automation policy: use 100% available capital, exclude ETF/ETN, one entry per day, dynamic take-profit, stop-loss -10%, no extra risk limits, real trading (no mock), full event alerts (2026-03-01).
+- Live automation configured: cron `kis-daytrade-live` runs weekdays during market hours (09:00-15:59) and preflight cron `kis-preflight-0855` runs at 08:55 weekdays (2026-03-01).
+- User requested daily chat dump to GitHub as TXT (not JSON). Auto script configured at `scripts/daily_chat_dump.sh` and cron `daily-chat-dump` set for 23:58 KST (2026-03-01).
+- Git preferences changed: user wants `.md`, `.env*`, `.env.example`, and `.json` ignored via `.gitignore` (2026-03-01).
+- User wants power usage answers as W-range estimates on request; WSL script created at `scripts/power_estimate_wsl.py` (2026-03-01).
 
 ==================================================
 2) 프로젝트 역할 대화 로그
@@ -489,6 +498,14 @@ client.py 주문 TR ID/POST 공통 호출기, main.py 주문 CLI 추가 진행.
 ==================================================
 4) Git 변경 요약(최근 커밋 20개)
 ==================================================
+d2602aa auto: workspace sync (2026-03-01 23:01:01 KST)
+466d746 auto: workspace sync (2026-03-01 22:51:01 KST)
+2490d46 auto: workspace sync (2026-03-01 22:49:01 KST)
+5d9964e auto: workspace sync (2026-03-01 22:48:01 KST)
+85bab81 auto: workspace sync (2026-03-01 22:43:01 KST)
+baf5126 auto: workspace sync (2026-03-01 22:32:01 KST)
+4e4bbda auto: workspace sync (2026-03-01 22:09:01 KST)
+0025941 auto: daily chat dump 2026-03-01
 5a83125 auto: workspace sync (2026-03-01 22:07:01 KST)
 c8c671c auto: daily chat dump 2026-03-01
 7aaa1db Add dated chat dump text report for 2026-03-01
@@ -501,13 +518,5 @@ d2ae20f Phase2 extension: dynamic top-volume screener, order inquiry flow, teleg
 e182b65 auto: workspace sync (2026-03-01 21:45:01 KST)
 0055686 auto: workspace sync (2026-03-01 21:44:01 KST)
 a809485 auto: workspace sync (2026-03-01 21:42:01 KST)
-664cbb9 auto: workspace sync (2026-03-01 21:41:01 KST)
-0a94bc7 auto: workspace sync (2026-03-01 21:29:01 KST)
-2197c52 auto: workspace sync (2026-03-01 21:28:01 KST)
-0b3e377 auto: workspace sync (2026-03-01 20:12:01 KST)
-aebaacb auto: workspace sync (2026-03-01 20:11:01 KST)
-f9b3d9e auto: workspace sync (2026-03-01 20:06:01 KST)
-ba21a8b auto: workspace sync (2026-03-01 19:55:01 KST)
-41a727c Delete kis-openapi/.kis_token.json
 
 [끝]
