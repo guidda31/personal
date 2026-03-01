@@ -181,7 +181,8 @@ def probability_score(bars_latest_first: list[DailyBar], usdkrw: float | None = 
         - fx_penalty
     )
 
-    prob = sigmoid(z) * 100
+    # Calibration: soften confidence to avoid saturated 0/100 outputs.
+    prob = sigmoid(z / 3.0) * 100
     details = {
         "mom_3": round(mom_3, 2),
         "mom_5": round(mom_5, 2),
