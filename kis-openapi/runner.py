@@ -112,6 +112,43 @@ def calc_qty(all_cash: int, price: int) -> int:
     return all_cash // price
 
 
+def tick_size(price: int) -> int:
+    # Simplified KRX tick ladder
+    if price < 2_000:
+        return 1
+    if price < 5_000:
+        return 5
+    if price < 20_000:
+        return 10
+    if price < 50_000:
+        return 50
+    if price < 200_000:
+        return 100
+    if price < 500_000:
+        return 500
+    return 1000
+
+
+def round_to_tick(price: int) -> int:
+    tk = tick_size(max(1, int(price)))
+    return max(1, (int(price) // tk) * tk)
+
+
+def clamp_order_price_by_krx_limit(price: int, prev_close: int) -> int:
+    # KRX daily limit: ±30% from previous close
+    if prev_close <= 0:
+        return round_to_tick(price)
+    lo = int(round(prev_close * 0.70))
+    hi = int(round(prev_close * 1.30))
+    p = min(max(int(price), lo), hi)
+    return round_to_tick(p)
+
+
+def is_continuous_session(t: dt.time) -> bool:
+    # Avoid opening/closing call auction windows
+    return dt.time(9, 1) <= t <= dt.time(15, 19)
+
+
 def run_once(dry_run: bool, confirm: str | None):
     cfg = load_config_from_env()
     client = KISClient(cfg)
@@ -122,15 +159,29 @@ def run_once(dry_run: bool, confirm: str | None):
     if state.get("date") != today:
         state = {"date": today, "entered": False, "symbol": "", "qty": 0, "avg_price": 0}
 
-    # 1) Entry window (09:00~10:00)
-    if not state["entered"] and dt.time(9, 0) <= t <= dt.time(10, 0):
+    # 1) Entry window (09:01~10:00, continuous session only)
+    if not state["entered"] and dt.time(9, 1) <= t <= dt.time(10, 0) and is_continuous_session(t):
         symbol, score, q = pick_top_symbol(client)
-        price = int(q.get("stck_prpr", "0") or 0)
+        raw_price = int(q.get("stck_prpr", "0") or 0)
+        prev_close = int(q.get("stck_sdpr", "0") or 0)
+        price = clamp_order_price_by_krx_limit(raw_price, prev_close)
         b = client.get_balance()
         cash = int((b.get("output2") or [{}])[0].get("dnca_tot_amt", "0"))
         qty = calc_qty(cash, price)
 
-        log_event("select", {"symbol": symbol, "score": score, "price": price, "cash": cash, "qty": qty}, notify=True)
+        log_event(
+            "select",
+            {
+                "symbol": symbol,
+                "score": score,
+                "raw_price": raw_price,
+                "prev_close": prev_close,
+                "order_price": price,
+                "cash": cash,
+                "qty": qty,
+            },
+            notify=True,
+        )
 
         if qty > 0:
             if dry_run:
@@ -152,28 +203,35 @@ def run_once(dry_run: bool, confirm: str | None):
 
         if avg > 0 and cur > 0:
             pnl = (cur - avg) / avg * 100
-            log_event("monitor", {"symbol": state['symbol'], "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2)})
+            prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
+            sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
+            log_event("monitor", {"symbol": state['symbol'], "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price})
 
             # stop loss -10%
             if pnl <= -10.0:
-                if dry_run:
-                    log_event("stoploss_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur}, notify=True)
+                if not is_continuous_session(t):
+                    log_event("stoploss_wait", {"symbol": state['symbol'], "reason": "not continuous session"}, notify=True)
                 else:
-                    if cfg.mode == "real" and confirm != "REAL_ORDER":
-                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                    res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=cur, ord_dvsn="00")
-                    log_event("stoploss_sell", {"result": res}, notify=True)
-                state.update({"entered": False, "qty": 0})
-                save_state(state)
+                    if dry_run:
+                        log_event("stoploss_dry_run", {"symbol": state['symbol'], "qty": qty, "price": sell_price}, notify=True)
+                    else:
+                        if cfg.mode == "real" and confirm != "REAL_ORDER":
+                            raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                        res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
+                        log_event("stoploss_sell", {"result": res}, notify=True)
+                    state.update({"entered": False, "qty": 0})
+                    save_state(state)
 
-        # force close 15:15+
-        if state["entered"] and t >= dt.time(15, 15):
+        # force close 15:15~15:19 (continuous only)
+        if state["entered"] and dt.time(15, 15) <= t <= dt.time(15, 19) and is_continuous_session(t):
+            prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
+            sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
             if dry_run:
-                log_event("eod_close_dry_run", {"symbol": state['symbol'], "qty": qty, "price": cur}, notify=True)
+                log_event("eod_close_dry_run", {"symbol": state['symbol'], "qty": qty, "price": sell_price}, notify=True)
             else:
                 if cfg.mode == "real" and confirm != "REAL_ORDER":
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=cur, ord_dvsn="00")
+                res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
                 log_event("eod_close_sell", {"result": res}, notify=True)
             state.update({"entered": False, "qty": 0})
             save_state(state)
