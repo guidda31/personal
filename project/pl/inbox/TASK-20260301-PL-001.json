@@ -1,0 +1,13 @@
+{
+  "taskId": "TASK-20260301-PL-001",
+  "fromRole": "pm",
+  "toRole": "pl",
+  "title": "KIS OpenAPI Phase1 기술 설계/경로 검증",
+  "objective": "호가/체결/일봉/계좌조회 API의 경로, 파라미터, TR ID 매핑 정리",
+  "inputs": ["apiportal.koreainvestment.com 문서", "kis-openapi/docs"],
+  "deliverables": ["TR ID 매핑표", "요청 파라미터 표준안", "에러 처리 기준"],
+  "acceptanceCriteria": ["모든 Phase1 엔드포인트 매핑 완료", "mock/real 분기 기준 명시"],
+  "priority": "P0",
+  "due": "2026-03-01 20:00 KST",
+  "notes": "설계 산출물은 pl/outbox로 전달"
+}

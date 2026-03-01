@@ -1,0 +1,13 @@
+{
+  "taskId": "TASK-20260301-QA-001",
+  "fromRole": "pm",
+  "toRole": "tester",
+  "title": "Phase1 테스트",
+  "objective": "mock 기준 quote/orderbook/conclusion/daily/balance 테스트 케이스 수행",
+  "inputs": ["개발 산출물", "테스트 계정 env"],
+  "deliverables": ["테스트 결과 리포트", "실패 케이스/재현 절차"],
+  "acceptanceCriteria": ["성공/실패 기준 명확", "재현 가능 로그 포함"],
+  "priority": "P0",
+  "due": "2026-03-01 20:30 KST",
+  "notes": "결과는 tester/outbox로 전달"
+}

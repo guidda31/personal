@@ -1,0 +1,13 @@
+{
+  "taskId": "TASK-20260301-DEV-001",
+  "fromRole": "pm",
+  "toRole": "developer",
+  "title": "Phase1 구현",
+  "objective": "KIS client/main에 호가/체결/일봉/계좌조회 기능 구현",
+  "inputs": ["PL 설계", "기존 client.py/main.py"],
+  "deliverables": ["코드 변경", "실행 예시"],
+  "acceptanceCriteria": ["CLI 명령 4개 추가", "py_compile 통과", "기본 호출 동작"],
+  "priority": "P0",
+  "due": "2026-03-01 20:20 KST",
+  "notes": "개발 결과는 developer/outbox + 코드 반영"
+}

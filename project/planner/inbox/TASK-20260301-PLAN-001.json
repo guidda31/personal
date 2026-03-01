@@ -1,0 +1,13 @@
+{
+  "taskId": "TASK-20260301-PLAN-001",
+  "fromRole": "pm",
+  "toRole": "planner",
+  "title": "Phase1 요구사항/수용기준 정리",
+  "objective": "호가/체결/일봉/계좌조회 기능의 사용자 관점 시나리오와 AC 정의",
+  "inputs": ["PM 지시사항", "기존 kis-openapi 구현"],
+  "deliverables": ["기능 요구사항", "수용기준(AC)", "출력 포맷 정의"],
+  "acceptanceCriteria": ["각 기능별 AC 3개 이상"],
+  "priority": "P1",
+  "due": "2026-03-01 20:10 KST",
+  "notes": "산출물은 planner/outbox로 전달"
+}
