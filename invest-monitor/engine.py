@@ -275,6 +275,13 @@ def target_stop_from_atr(cur: float, atr: float, style: str = "neutral") -> tupl
 
     target = int(round(cur + atr * t_mult))
     stop = int(round(max(1, cur - atr * s_mult)))
+
+    # KRX daily price limit guard (day-trading realism): +/-30%
+    max_target = int(round(cur * 1.30))
+    min_stop = int(round(cur * 0.70))
+    target = min(target, max_target)
+    stop = max(stop, min_stop)
+
     return target, stop, regime
 
 
