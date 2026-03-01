@@ -33,17 +33,28 @@ for k in sorted(by_day):
     low_kwh, high_kwh, n = by_day[k]
     print(f'- {k}: {low_kwh:.3f}~{high_kwh:.3f} kWh / {low_kwh*RATE:,.0f}~{high_kwh*RATE:,.0f}원 (샘플 {n}h)')
 
-# billing cycle 2/17~3/16 (current cycle around today)
+# billing cycle rule: N월 17일 ~ N+1월 16일 => (N+1)월 요금
+
+def add_month(y: int, m: int, delta: int):
+    m2 = m + delta
+    y2 = y + (m2 - 1) // 12
+    m2 = (m2 - 1) % 12 + 1
+    return y2, m2
+
+
 today = date.today()
-if today.month >= 3:
-    start = date(today.year,2,17)
-    end = date(today.year,3,16)
+if today.day >= 17:
+    start_y, start_m = today.year, today.month
 else:
-    start = date(today.year-1,2,17)
-    end = date(today.year-1,3,16)
+    start_y, start_m = add_month(today.year, today.month, -1)
+
+end_y, end_m = add_month(start_y, start_m, 1)
+start = date(start_y, start_m, 17)
+end = date(end_y, end_m, 16)
+bill_month_label = f"{end_y}-{end_m:02d}"  # 예: 2026-03 (3월 요금)
 
 sum_low = sum(v[0] for k,v in by_day.items() if start <= date.fromisoformat(k) <= end)
 sum_high = sum(v[1] for k,v in by_day.items() if start <= date.fromisoformat(k) <= end)
-print('\n월 정산 구간(2/17~3/16) 누적')
+print(f"\n월 정산 구간({start.isoformat()}~{end.isoformat()}) 누적 / {bill_month_label} 요금")
 print(f'- 사용량: {sum_low:.3f}~{sum_high:.3f} kWh')
 print(f'- 요금(추정): {sum_low*RATE:,.0f}~{sum_high*RATE:,.0f}원 (단가 {RATE:.0f}원/kWh 가정)')
