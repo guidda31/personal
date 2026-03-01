@@ -1,0 +1,20 @@
+{
+  "reportId": "REPORT-20260301-DEV-001",
+  "role": "developer",
+  "taskId": "TASK-20260301-DEV-001",
+  "status": "done",
+  "summary": "main.py CLI 확장 및 Phase1 구현 반영 완료.",
+  "outputs": [
+    "명령 추가: orderbook, conclusion, daily, balance",
+    "py_compile 통과",
+    "quote/orderbook/conclusion/daily 실호출 성공"
+  ],
+  "issues": [
+    "balance 호출은 계좌값 문제로 OPSQ2000(INVALID_CHECK_ACNO)"
+  ],
+  "nextActions": [
+    "KIS_ACCOUNT_NO 입력 규칙 재확인",
+    "balance 파라미터 문서 재검증"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}

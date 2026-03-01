@@ -1,0 +1,20 @@
+{
+  "reportId": "REPORT-20260301-PL-001",
+  "role": "pl",
+  "taskId": "TASK-20260301-PL-001",
+  "status": "done",
+  "summary": "Phase1 기술 설계 반영 완료. 시세(현재가/호가/체결/일봉) + 계좌조회 엔드포인트를 client 단에 모듈화.",
+  "outputs": [
+    "client.py: _get 공통 호출기/재시도 추가",
+    "client.py: get_domestic_orderbook/get_domestic_conclusion/get_domestic_daily/get_balance 추가",
+    "TR ID 매핑 확장"
+  ],
+  "issues": [
+    "계좌조회는 KIS_ACCOUNT_NO 형식/값 검증 필요(현재 INVALID_CHECK_ACNO 응답 확인)"
+  ],
+  "nextActions": [
+    "계좌번호 규칙 검증 및 파라미터 보정",
+    "주문 API 설계 착수"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}

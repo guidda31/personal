@@ -1,0 +1,19 @@
+{
+  "reportId": "REPORT-20260301-PLAN-001",
+  "role": "planner",
+  "taskId": "TASK-20260301-PLAN-001",
+  "status": "done",
+  "summary": "Phase1 기능 요구/수용기준 정리 완료",
+  "outputs": [
+    "시세 조회 4종(현재가/호가/체결/일봉) 응답 JSON 출력",
+    "계좌조회 balance 명령 제공",
+    "각 명령 실패 시 표준 에러 메시지 반환"
+  ],
+  "issues": [
+    "계좌 관련 AC는 계좌값 유효성 확인 후 최종 완료 처리 필요"
+  ],
+  "nextActions": [
+    "Phase2 주문/계좌 고도화 요구사항 작성"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}
