@@ -3,7 +3,10 @@ import argparse
 import json
 import sys
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None
 
 from client import KISClient, load_config_from_env
 
@@ -27,7 +30,8 @@ def cmd_quote(symbol: str):
 
 
 def main():
-    load_dotenv()
+    if load_dotenv:
+        load_dotenv()
 
     p = argparse.ArgumentParser(description="KIS OpenAPI sample client")
     sub = p.add_subparsers(dest="command", required=True)
