@@ -21,6 +21,11 @@ import os
 import time
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
 from client import KISClient, load_config_from_env
 
 STATE_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_state.json")
@@ -143,6 +148,9 @@ def run_once(dry_run: bool, confirm: str | None):
 
 
 def main():
+    if load_dotenv:
+        load_dotenv()
+
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--run", action="store_true")
