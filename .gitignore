@@ -9,3 +9,7 @@
 **/.env.*
 .env.example
 **/.env.example
+
+# Ignore JSON files
+*.json
+**/*.json
