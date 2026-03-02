@@ -18,6 +18,7 @@ export default function App() {
   const [news, setNews] = useState([])
   const [newsQ, setNewsQ] = useState('')
   const [newsCategory, setNewsCategory] = useState('')
+  const [newsSource, setNewsSource] = useState('')
   const [newsDays, setNewsDays] = useState(30)
   const [newsSort, setNewsSort] = useState('latest')
   const [expandedNews, setExpandedNews] = useState({})
@@ -60,7 +61,8 @@ export default function App() {
       setError('')
       const qs = new URLSearchParams({ limit: '50', days: String(newsDays) })
       if (newsCategory) qs.set('category', newsCategory)
-      if (newsQ) qs.set('q', newsQ)
+      const qMerged = [newsQ, newsSource].filter(Boolean).join(' ')
+      if (qMerged) qs.set('q', qMerged)
       const n = await apiGet(`/api/news?${qs.toString()}`)
       setNews(n.items || [])
     } catch (e) {
@@ -168,7 +170,7 @@ export default function App() {
       <>
         <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
         <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto auto', gap: 8, marginBottom: 12 }}>
           <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
           <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
           <select value={newsDays} onChange={(e) => setNewsDays(Number(e.target.value))} style={{ ...box, color: '#e5e7eb' }}>
@@ -181,11 +183,12 @@ export default function App() {
             <option value='oldest'>오래된순</option>
           </select>
           <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
+          <button onClick={() => { setNewsQ(''); setNewsCategory(''); setNewsSource('') }} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>필터 초기화</button>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           {Object.entries(sourceCount).slice(0, 8).map(([s, c]) => (
-            <span key={s} style={{ ...box, padding: '4px 8px', fontSize: 12, color: '#cbd5e1' }}>{s} {c}</span>
+            <button key={s} onClick={() => setNewsSource(s)} style={{ ...box, padding: '4px 8px', fontSize: 12, color: newsSource===s ? '#7dd3fc':'#cbd5e1', cursor:'pointer' }}>{s} {c}</button>
           ))}
         </div>
         <div style={box}>
