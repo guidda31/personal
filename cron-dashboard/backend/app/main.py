@@ -1,10 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException
+import os
+import secrets
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from .database import get_db
 
-app = FastAPI(title='Cron Dashboard API', version='2.0.0')
+app = FastAPI(title='Cron Dashboard API', version='2.1.0')
+security = HTTPBasic(auto_error=False)
+AUTH_USER = os.getenv('CRON_DASHBOARD_AUTH_USER', '')
+AUTH_PASS = os.getenv('CRON_DASHBOARD_AUTH_PASS', '')
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,8 +21,28 @@ app.add_middleware(
 )
 
 
+def auth_guard(credentials: HTTPBasicCredentials | None = Depends(security)):
+    if not AUTH_USER or not AUTH_PASS:
+        return True
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='unauthorized',
+            headers={'WWW-Authenticate': 'Basic'},
+        )
+    ok_user = secrets.compare_digest(credentials.username, AUTH_USER)
+    ok_pass = secrets.compare_digest(credentials.password, AUTH_PASS)
+    if not (ok_user and ok_pass):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='unauthorized',
+            headers={'WWW-Authenticate': 'Basic'},
+        )
+    return True
+
+
 @app.get('/api/cron/jobs')
-def cron_jobs(db: Session = Depends(get_db)):
+def cron_jobs(_: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     rows = db.execute(text('''
         SELECT id,name,enabled,schedule_expr,schedule_tz,status,next_run_at_ms,last_run_at_ms,last_duration_ms,session_target,agent_id,updated_at_ms
         FROM cron_jobs
@@ -43,7 +69,7 @@ def cron_jobs(db: Session = Depends(get_db)):
 
 
 @app.get('/api/cron/summary')
-def cron_summary(db: Session = Depends(get_db)):
+def cron_summary(_: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     row = db.execute(text('''
         SELECT
           (SELECT COUNT(*) FROM cron_jobs) AS total_jobs,
@@ -64,7 +90,7 @@ def cron_summary(db: Session = Depends(get_db)):
 
 
 @app.get('/api/cron/jobs/{job_id}')
-def cron_job_detail(job_id: str, db: Session = Depends(get_db)):
+def cron_job_detail(job_id: str, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     row = db.execute(text('''
         SELECT id,name,enabled,schedule_kind,schedule_expr,schedule_tz,session_target,wake_mode,agent_id,status,
                next_run_at_ms,last_run_at_ms,last_duration_ms,last_delivery_status,consecutive_errors,
@@ -86,7 +112,7 @@ def cron_job_detail(job_id: str, db: Session = Depends(get_db)):
 
 
 @app.get('/api/cron/jobs/{job_id}/runs')
-def cron_job_runs(job_id: str, limit: int = 20, db: Session = Depends(get_db)):
+def cron_job_runs(job_id: str, limit: int = 20, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     lim = min(max(limit, 1), 100)
     rows = db.execute(text('''
         SELECT run_id,run_at_ms,status,duration_ms,delivered,delivery_status,model,provider,usage_total_tokens,summary
@@ -105,7 +131,7 @@ def cron_job_runs(job_id: str, limit: int = 20, db: Session = Depends(get_db)):
 
 
 @app.get('/api/cron/jobs/{job_id}/raw')
-def cron_job_raw(job_id: str, db: Session = Depends(get_db)):
+def cron_job_raw(job_id: str, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     row = db.execute(text('SELECT raw_json FROM cron_jobs WHERE id=:id LIMIT 1'), {'id': job_id}).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail='not found')
