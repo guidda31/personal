@@ -2,6 +2,9 @@
 const http = require('http');
 const { exec } = require('child_process');
 const { URL } = require('url');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const HOST = process.env.CRON_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.CRON_DASHBOARD_PORT || 8088);
@@ -23,8 +26,14 @@ function safe(v) {
 }
 
 async function queryRows(sql) {
-  const out = await run(`mariadb --default-character-set=utf8mb4 -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -N -B -e ${JSON.stringify(sql)}`);
-  return out.trim() ? out.trim().split('\n').map((line) => line.split('\t')) : [];
+  const f = path.join(os.tmpdir(), `cron_dash_query_${Date.now()}_${Math.random().toString(36).slice(2)}.sql`);
+  fs.writeFileSync(f, sql, 'utf8');
+  try {
+    const out = await run(`mariadb --default-character-set=utf8mb4 -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -N -B < ${f}`);
+    return out.trim() ? out.trim().split('\n').map((line) => line.split('\t')) : [];
+  } finally {
+    try { fs.unlinkSync(f); } catch {}
+  }
 }
 
 async function getJobs() {

@@ -63,3 +63,4 @@ SyntaxError: Unexpected identifier 'data'
 
 Node.js v22.22.0
 [cron-dashboard] listening on http://0.0.0.0:8088
+[cron-dashboard] listening on http://0.0.0.0:8088
