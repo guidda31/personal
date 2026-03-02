@@ -19,6 +19,8 @@ export default function App() {
   const [newsQ, setNewsQ] = useState('')
   const [newsCategory, setNewsCategory] = useState('')
   const [newsDays, setNewsDays] = useState(30)
+  const [newsSort, setNewsSort] = useState('latest')
+  const [expandedNews, setExpandedNews] = useState({})
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [selectedId, setSelectedId] = useState('')
@@ -149,32 +151,59 @@ export default function App() {
     </>
   )
 
-  const renderNews = () => (
-    <>
-      <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
-      <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px auto', gap: 8, marginBottom: 12 }}>
-        <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
-        <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
-        <select value={newsDays} onChange={(e) => setNewsDays(Number(e.target.value))} style={{ ...box, color: '#e5e7eb' }}>
-          <option value={7}>최근 7일</option>
-          <option value={30}>최근 30일</option>
-          <option value={90}>최근 90일</option>
-        </select>
-        <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
-      </div>
-      <div style={box}>
-        {news.length === 0 ? <div style={{ color: '#94a3b8' }}>조건에 맞는 뉴스가 없습니다.</div> : news.map((n) => (
-          <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
-            <div style={{ fontWeight: 700 }}>{n.title}</div>
-            <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
-            <div style={{ marginTop: 4, fontSize: 13 }}>{n.summary || '-'}</div>
-            {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
-          </div>
-        ))}
-      </div>
-    </>
-  )
+  const renderNews = () => {
+    const sorted = [...news].sort((a, b) => {
+      const ta = a.publishedAtMs || a.createdAtMs || 0
+      const tb = b.publishedAtMs || b.createdAtMs || 0
+      return newsSort === 'latest' ? tb - ta : ta - tb
+    })
+
+    return (
+      <>
+        <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
+        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto', gap: 8, marginBottom: 12 }}>
+          <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
+          <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
+          <select value={newsDays} onChange={(e) => setNewsDays(Number(e.target.value))} style={{ ...box, color: '#e5e7eb' }}>
+            <option value={7}>최근 7일</option>
+            <option value={30}>최근 30일</option>
+            <option value={90}>최근 90일</option>
+          </select>
+          <select value={newsSort} onChange={(e) => setNewsSort(e.target.value)} style={{ ...box, color: '#e5e7eb' }}>
+            <option value='latest'>최신순</option>
+            <option value='oldest'>오래된순</option>
+          </select>
+          <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
+        </div>
+        <div style={box}>
+          {sorted.length === 0 ? <div style={{ color: '#94a3b8' }}>조건에 맞는 뉴스가 없습니다.</div> : sorted.map((n) => {
+            const expanded = !!expandedNews[n.id]
+            const body = n.summary || '-'
+            const shortBody = body.length > 240 && !expanded ? body.slice(0, 240) + ' ...' : body
+            return (
+              <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
+                <div style={{ fontWeight: 700 }}>{n.title}</div>
+                <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
+                <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{shortBody}</div>
+                <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center' }}>
+                  {body.length > 240 && (
+                    <button
+                      onClick={() => setExpandedNews((p) => ({ ...p, [n.id]: !p[n.id] }))}
+                      style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#e5e7eb', fontSize: 12 }}
+                    >
+                      {expanded ? '요약 접기' : '요약 펼치기'}
+                    </button>
+                  )}
+                  {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </>
+    )
+  }
 
   return (
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: '#0f172a', minHeight: '100vh', color: '#e5e7eb', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr' }}>
