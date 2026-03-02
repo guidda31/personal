@@ -17,10 +17,10 @@ export default function App() {
   const [jobs, setJobs] = useState([])
   const [news, setNews] = useState([])
   const [newsCategories, setNewsCategories] = useState([])
-  const [newsQ, setNewsQ] = useState('')
-  const [newsCategory, setNewsCategory] = useState('')
-  const [newsSource, setNewsSource] = useState('')
-  const [newsDays, setNewsDays] = useState(30)
+  const [newsQ, setNewsQ] = useState(localStorage.getItem('news_q') || '')
+  const [newsCategory, setNewsCategory] = useState(localStorage.getItem('news_category') || '')
+  const [newsSource, setNewsSource] = useState(localStorage.getItem('news_source') || '')
+  const [newsDays, setNewsDays] = useState(Number(localStorage.getItem('news_days') || 30))
   const [newsSort, setNewsSort] = useState('latest')
   const [expandedNews, setExpandedNews] = useState({})
   const [q, setQ] = useState('')
@@ -97,6 +97,24 @@ export default function App() {
     menu === 'dashboard' ? loadSummaryAndJobs() : loadNews()
   }
 
+  const saveNewsFilters = () => {
+    localStorage.setItem('news_q', newsQ)
+    localStorage.setItem('news_category', newsCategory)
+    localStorage.setItem('news_source', newsSource)
+    localStorage.setItem('news_days', String(newsDays))
+  }
+
+  const resetNewsFilters = () => {
+    setNewsQ('')
+    setNewsCategory('')
+    setNewsSource('')
+    setNewsDays(30)
+    localStorage.removeItem('news_q')
+    localStorage.removeItem('news_category')
+    localStorage.removeItem('news_source')
+    localStorage.removeItem('news_days')
+  }
+
   const clearAuth = () => {
     setAuthUser('')
     setAuthPass('')
@@ -111,6 +129,13 @@ export default function App() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem('news_q', newsQ)
+    localStorage.setItem('news_category', newsCategory)
+    localStorage.setItem('news_source', newsSource)
+    localStorage.setItem('news_days', String(newsDays))
+  }, [newsQ, newsCategory, newsSource, newsDays])
 
   const filtered = useMemo(() => jobs.filter((j) => {
     const hit = !q || j.name.toLowerCase().includes(q.toLowerCase()) || j.id.toLowerCase().includes(q.toLowerCase())
@@ -179,7 +204,7 @@ export default function App() {
       <>
         <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
         <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto auto', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto auto auto', gap: 8, marginBottom: 12 }}>
           <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
           <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
           <select value={newsDays} onChange={(e) => setNewsDays(Number(e.target.value))} style={{ ...box, color: '#e5e7eb' }}>
@@ -192,7 +217,8 @@ export default function App() {
             <option value='oldest'>오래된순</option>
           </select>
           <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
-          <button onClick={() => { setNewsQ(''); setNewsCategory(''); setNewsSource('') }} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>필터 초기화</button>
+          <button onClick={saveNewsFilters} style={{ ...box, cursor: 'pointer', color: '#7dd3fc' }}>필터 저장</button>
+          <button onClick={resetNewsFilters} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>필터 초기화</button>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
