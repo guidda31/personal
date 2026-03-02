@@ -85,6 +85,7 @@ def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depen
 def news_list(
     limit: int = 30,
     category: str | None = None,
+    source: str | None = None,
     q: str | None = None,
     days: int = 30,
     _: bool = Depends(auth_guard),
@@ -100,6 +101,9 @@ def news_list(
     if category:
         where.append('category = :category')
         params['category'] = category
+    if source:
+        where.append('source = :source')
+        params['source'] = source
     if q:
         where.append('(title LIKE :q OR summary LIKE :q OR source LIKE :q)')
         params['q'] = f'%{q}%'

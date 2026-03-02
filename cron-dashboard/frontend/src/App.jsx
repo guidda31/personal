@@ -63,8 +63,8 @@ export default function App() {
       setError('')
       const qs = new URLSearchParams({ limit: '50', days: String(newsDays) })
       if (newsCategory) qs.set('category', newsCategory)
-      const qMerged = [newsQ, newsSource].filter(Boolean).join(' ')
-      if (qMerged) qs.set('q', qMerged)
+      if (newsSource) qs.set('source', newsSource)
+      if (newsQ) qs.set('q', newsQ)
       const [n, c] = await Promise.all([
         apiGet(`/api/news?${qs.toString()}`),
         apiGet('/api/news/categories')
