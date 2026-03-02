@@ -141,12 +141,14 @@ async function upsertJobs(jobs, now) {
 
   const sql = `
 INSERT INTO cron_jobs (
-  id,name,enabled,schedule_kind,schedule_expr,schedule_tz,session_target,wake_mode,agent_id,status,next_run_at_ms,last_run_at_ms,last_duration_ms,last_delivery_status,consecutive_errors,payload_kind,payload_message,delivery_mode,delivery_channel,delivery_to,raw_json,updated_at_ms
+  id,name,enabled,target,agent,schedule_kind,schedule_expr,schedule_tz,session_target,wake_mode,agent_id,status,next_run_at_ms,last_run_at_ms,last_duration_ms,last_delivery_status,consecutive_errors,payload_kind,payload_message,delivery_mode,delivery_channel,delivery_to,raw_json,updated_at_ms
 ) VALUES
 ${values}
 ON DUPLICATE KEY UPDATE
   name=VALUES(name),
   enabled=VALUES(enabled),
+  target=VALUES(target),
+  agent=VALUES(agent),
   schedule_kind=VALUES(schedule_kind),
   schedule_expr=VALUES(schedule_expr),
   schedule_tz=VALUES(schedule_tz),
