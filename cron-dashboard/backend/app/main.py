@@ -67,6 +67,20 @@ def news_categories(_: bool = Depends(auth_guard), db: Session = Depends(get_db)
     return {'items': [{'category': r['category'], 'count': int(r['cnt'])} for r in rows]}
 
 
+@app.get('/api/news/{news_id}')
+def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+    row = db.execute(text('''
+        SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
+        FROM news_items WHERE id=:id LIMIT 1
+    '''), {'id': news_id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail='not found')
+    return {
+        'id': row['id'], 'title': row['title'], 'source': row['source'], 'category': row['category'],
+        'summary': row['summary'], 'url': row['url'], 'publishedAtMs': row['published_at_ms'], 'createdAtMs': row['created_at_ms']
+    }
+
+
 @app.get('/api/news')
 def news_list(
     limit: int = 30,

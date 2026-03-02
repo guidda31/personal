@@ -23,6 +23,7 @@ export default function App() {
   const [newsDays, setNewsDays] = useState(Number(localStorage.getItem('news_days') || 30))
   const [newsSort, setNewsSort] = useState('latest')
   const [expandedNews, setExpandedNews] = useState({})
+  const [newsDetail, setNewsDetail] = useState(null)
   const [q, setQ] = useState(localStorage.getItem('dash_q') || '')
   const [status, setStatus] = useState(localStorage.getItem('dash_status') || '')
   const [selectedId, setSelectedId] = useState('')
@@ -72,6 +73,15 @@ export default function App() {
       setNewsCategories(c.items || [])
     } catch (e) {
       setError('뉴스 조회 오류: ' + e.message)
+    }
+  }
+
+  const loadNewsDetail = async (id) => {
+    try {
+      const d = await apiGet(`/api/news/${id}`)
+      setNewsDetail(d)
+    } catch (e) {
+      setError('뉴스 상세 조회 오류: ' + e.message)
     }
   }
 
@@ -265,6 +275,7 @@ export default function App() {
                       {expanded ? '요약 접기' : '요약 펼치기'}
                     </button>
                   )}
+                  <button onClick={() => loadNewsDetail(n.id)} style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#7dd3fc', fontSize: 12 }}>상세 보기</button>
                   <button
                     onClick={() => navigator.clipboard?.writeText(`${n.title}\n\n${body}`)}
                     style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#e5e7eb', fontSize: 12 }}
@@ -290,6 +301,18 @@ export default function App() {
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
+        {newsDetail && (
+          <div style={{ ...box, marginBottom: 10, borderColor:'#1f4b63' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+              <strong>뉴스 상세</strong>
+              <button onClick={() => setNewsDetail(null)} style={{ ...box, padding:'4px 8px', cursor:'pointer', color:'#e5e7eb' }}>닫기</button>
+            </div>
+            <div style={{ fontWeight:700 }}>{newsDetail.title}</div>
+            <div style={{ color:'#94a3b8', fontSize:12 }}>{newsDetail.source || '-'} · {newsDetail.category || '-'} · {newsDetail.publishedAtMs ? new Date(newsDetail.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
+            <pre style={{ ...box, marginTop:8, whiteSpace:'pre-wrap', maxHeight:260, overflow:'auto' }}>{newsDetail.summary || '-'}</pre>
+            {newsDetail.url && <a href={newsDetail.url} target='_blank' rel='noreferrer' style={{ color:'#7dd3fc', fontSize:12 }}>원문 보기</a>}
+          </div>
+        )}
         {isMobile && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <button onClick={() => setMenu('dashboard')} style={{ ...box, cursor: 'pointer', color: menu==='dashboard' ? '#7dd3fc' : '#e5e7eb', background: menu==='dashboard' ? '#0b2536' : '#111827' }}>대시보드</button>
