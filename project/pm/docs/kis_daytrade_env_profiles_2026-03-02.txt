@@ -1,0 +1,65 @@
+[KIS Daytrade .env 권장 프로파일 | 2026-03-02]
+
+목표: 분할진입/동적사이징/일일손실한도를 성향별로 즉시 바꿔 쓸 수 있게 표준값 제공.
+
+공통 키
+- DT_POSITION_FRACTION_LOW
+- DT_POSITION_FRACTION_MID
+- DT_POSITION_FRACTION_HIGH
+- DT_DAILY_MAX_LOSS_PCT
+- DT_ENTRY_SPLITS
+- DT_ENTRY_SPLIT_INTERVAL_SEC
+
+--------------------------------------------------
+1) 보수형 (변동성 장세 방어 우선)
+--------------------------------------------------
+DT_POSITION_FRACTION_LOW=0.70
+DT_POSITION_FRACTION_MID=0.45
+DT_POSITION_FRACTION_HIGH=0.20
+DT_DAILY_MAX_LOSS_PCT=1.2
+DT_ENTRY_SPLITS=30,30,20,20
+DT_ENTRY_SPLIT_INTERVAL_SEC=90
+
+해석
+- 한 번에 들어가는 금액을 크게 줄이고, 분할 횟수를 늘려 체결 리스크 완화.
+- 하루 손실 한도를 낮춰 손실 확산 차단.
+
+--------------------------------------------------
+2) 중립형 (현재 적용, 기본 권장)
+--------------------------------------------------
+DT_POSITION_FRACTION_LOW=1.00
+DT_POSITION_FRACTION_MID=0.60
+DT_POSITION_FRACTION_HIGH=0.35
+DT_DAILY_MAX_LOSS_PCT=2.5
+DT_ENTRY_SPLITS=40,35,25
+DT_ENTRY_SPLIT_INTERVAL_SEC=45
+
+해석
+- 저변동 구간에서는 기회를 살리고, 고변동에서는 자동으로 사이즈 축소.
+- 손익/안정성 균형형.
+
+--------------------------------------------------
+3) 공격형 (수익 기회 우선, 변동성 감수)
+--------------------------------------------------
+DT_POSITION_FRACTION_LOW=1.00
+DT_POSITION_FRACTION_MID=0.85
+DT_POSITION_FRACTION_HIGH=0.55
+DT_DAILY_MAX_LOSS_PCT=4.0
+DT_ENTRY_SPLITS=50,30,20
+DT_ENTRY_SPLIT_INTERVAL_SEC=25
+
+해석
+- 고변동에서도 진입 비중을 상대적으로 높게 유지.
+- 손실 한도가 넓어 수익/손실 모두 확대 가능.
+
+--------------------------------------------------
+운영 가이드 (실전)
+--------------------------------------------------
+- 지정학/환율 급등 구간: 보수형
+- 일반 장세: 중립형
+- 추세 강하고 변동성 안정: 공격형
+
+권장 운용
+- 기본은 중립형 유지
+- 장 시작 전 08:40 감사 리포트(kis-go-live-audit-0840)에서 리스크 높음 판정 시 보수형으로 전환
+- 공격형은 최소 3거래일 모의(dry-run) 로그 확인 후 제한적으로 사용
