@@ -85,7 +85,16 @@ def log_event(kind: str, payload: dict, notify: bool = False):
 
 def load_state() -> dict:
     if not STATE_FILE.exists():
-        return {"date": "", "entered": False, "symbol": "", "qty": 0, "avg_price": 0}
+        return {
+            "date": "",
+            "entered": False,
+            "symbol": "",
+            "qty": 0,
+            "avg_price": 0,
+            "realized_pnl_pct": 0.0,
+            "trading_disabled_today": False,
+            "entry_legs_done": 0,
+        }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
 
@@ -179,6 +188,69 @@ def is_continuous_session(t: dt.time) -> bool:
     return dt.time(9, 1) <= t <= dt.time(15, 19)
 
 
+def env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)).strip())
+    except Exception:
+        return default
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(float(os.getenv(name, str(default)).strip()))
+    except Exception:
+        return default
+
+
+def parse_splits(s: str) -> list[float]:
+    raw = [x.strip() for x in (s or "").split(",") if x.strip()]
+    vals = []
+    for x in raw:
+        try:
+            v = float(x)
+            if v > 0:
+                vals.append(v)
+        except Exception:
+            pass
+    if not vals:
+        vals = [100.0]
+    tot = sum(vals)
+    return [v / tot for v in vals]
+
+
+def volatility_regime_from_quote(o: dict) -> str:
+    # Proxy regime from quote fields when minute bars are unavailable
+    try:
+        rate = abs(float(o.get("prdy_ctrt", "0") or 0))
+    except Exception:
+        rate = 0.0
+    try:
+        vol_rate = abs(float(o.get("prdy_vrss_vol_rate", "0") or 0))
+    except Exception:
+        vol_rate = 0.0
+    score = rate + (vol_rate / 50.0)
+    if score >= 8.0:
+        return "high"
+    if score >= 4.0:
+        return "mid"
+    return "low"
+
+
+def position_fraction(regime: str) -> float:
+    low = env_float("DT_POSITION_FRACTION_LOW", 1.0)
+    mid = env_float("DT_POSITION_FRACTION_MID", 0.6)
+    high = env_float("DT_POSITION_FRACTION_HIGH", 0.35)
+    mp = {"low": low, "mid": mid, "high": high}
+    v = mp.get(regime, mid)
+    return max(0.05, min(1.0, v))
+
+
+def daily_loss_guard(state: dict) -> bool:
+    max_loss_pct = abs(env_float("DT_DAILY_MAX_LOSS_PCT", 2.5))
+    realized = float(state.get("realized_pnl_pct", 0.0) or 0.0)
+    return realized <= -max_loss_pct
+
+
 def run_once(dry_run: bool, confirm: str | None):
     cfg = load_config_from_env()
     client = KISClient(cfg)
@@ -187,10 +259,23 @@ def run_once(dry_run: bool, confirm: str | None):
 
     state = load_state()
     if state.get("date") != today:
-        state = {"date": today, "entered": False, "symbol": "", "qty": 0, "avg_price": 0}
+        state = {
+            "date": today,
+            "entered": False,
+            "symbol": "",
+            "qty": 0,
+            "avg_price": 0,
+            "realized_pnl_pct": 0.0,
+            "trading_disabled_today": False,
+            "entry_legs_done": 0,
+        }
 
     # 1) Entry window (09:01~10:00, continuous session only)
     if not state["entered"] and dt.time(9, 1) <= t <= dt.time(10, 0) and is_continuous_session(t):
+        if daily_loss_guard(state) or state.get("trading_disabled_today"):
+            log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
+            return
+
         symbol, score, q = pick_top_symbol(client)
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
@@ -198,10 +283,18 @@ def run_once(dry_run: bool, confirm: str | None):
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
         prev_close = int(q.get("stck_sdpr", "0") or 0)
-        price = clamp_order_price_by_krx_limit(raw_price, prev_close)
+        regime = volatility_regime_from_quote(q)
+        frac = position_fraction(regime)
+
         b = client.get_balance()
         cash = int((b.get("output2") or [{}])[0].get("dnca_tot_amt", "0"))
-        qty = calc_qty(cash, price)
+        usable_cash = int(cash * frac)
+
+        splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
+        interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
+
+        total_qty = 0
+        total_cost = 0
 
         log_event(
             "select",
@@ -210,22 +303,50 @@ def run_once(dry_run: bool, confirm: str | None):
                 "score": score,
                 "raw_price": raw_price,
                 "prev_close": prev_close,
-                "order_price": price,
+                "regime": regime,
+                "position_fraction": frac,
                 "cash": cash,
-                "qty": qty,
+                "usable_cash": usable_cash,
+                "splits": splits,
             },
             notify=True,
         )
 
-        if qty > 0:
+        for i, w in enumerate(splits, start=1):
+            # refresh quote each leg
+            q_now = client.get_domestic_quote(symbol).get("output", {})
+            leg_raw = int(q_now.get("stck_prpr", "0") or raw_price)
+            leg_prev = int(q_now.get("stck_sdpr", "0") or prev_close)
+            leg_price = clamp_order_price_by_krx_limit(leg_raw, leg_prev)
+
+            remaining_cash = max(0, usable_cash - total_cost)
+            leg_budget = int(usable_cash * w)
+            leg_budget = min(leg_budget, remaining_cash)
+            leg_qty = calc_qty(leg_budget, leg_price)
+
+            if leg_qty <= 0:
+                log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "qty=0", "budget": leg_budget, "price": leg_price})
+                continue
+
             if dry_run:
-                log_event("buy_dry_run", {"symbol": symbol, "qty": qty, "price": price}, notify=True)
+                log_event("buy_dry_run", {"symbol": symbol, "leg": i, "qty": leg_qty, "price": leg_price}, notify=True)
             else:
                 if cfg.mode == "real" and confirm != "REAL_ORDER":
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                res = client.order_cash_buy(symbol=symbol, qty=qty, price=price, ord_dvsn="00")
-                log_event("buy_submitted", {"symbol": symbol, "qty": qty, "price": price, "result": res}, notify=True)
-            state.update({"entered": True, "symbol": symbol, "qty": qty, "avg_price": price})
+                res = client.order_cash_buy(symbol=symbol, qty=leg_qty, price=leg_price, ord_dvsn="00")
+                log_event("buy_submitted", {"symbol": symbol, "leg": i, "qty": leg_qty, "price": leg_price, "result": res}, notify=True)
+
+            total_qty += leg_qty
+            total_cost += leg_qty * leg_price
+            state["entry_legs_done"] = i
+            save_state(state)
+
+            if i < len(splits):
+                time.sleep(max(1, interval_sec))
+
+        if total_qty > 0:
+            avg_price = int(round(total_cost / total_qty))
+            state.update({"entered": True, "symbol": symbol, "qty": total_qty, "avg_price": avg_price})
             save_state(state)
 
     # 2) Risk/exit monitor
