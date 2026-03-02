@@ -3,7 +3,7 @@
 > vite --host 0.0.0.0 --port 5173
 
 
-  VITE v5.4.21  ready in 106 ms
+  VITE v5.4.21  ready in 103 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: http://10.255.255.254:5173/
