@@ -91,17 +91,6 @@ MARKET_COND = """
 )
 """
 
-ISSUE_FORCE_COND = """
-(
-  source LIKE '%daily-news-summary%'
-  AND title NOT LIKE '%증시%'
-  AND title NOT LIKE '%주식%'
-  AND title NOT LIKE '%KRX%'
-  AND title NOT LIKE '%코스피%'
-  AND title NOT LIKE '%코스닥%'
-  AND title NOT LIKE '%종목%'
-)
-"""
 
 
 @app.get('/api/news/market')
@@ -136,10 +125,7 @@ def news_others(limit: int = 50, days: int = 30, _: bool = Depends(auth_guard), 
         SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
         FROM news_items
         WHERE COALESCE(published_at_ms, created_at_ms) >= :min_ts
-          AND (
-            NOT {MARKET_COND}
-            OR {ISSUE_FORCE_COND}
-          )
+          AND NOT {MARKET_COND}
         ORDER BY COALESCE(published_at_ms, created_at_ms) DESC
         LIMIT :lim
     '''), {'min_ts': min_ts, 'lim': lim}).mappings().all()
