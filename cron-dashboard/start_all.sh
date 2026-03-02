@@ -6,7 +6,7 @@ mkdir -p "$TMP_DIR"
 
 is_listening() {
   local port="$1"
-  ss -ltn "( sport = :$port )" | grep -q ":$port"
+  ss -ltn "( sport = :$port )" | awk 'NR>1 && $1=="LISTEN" {print}' | grep -q ":$port"
 }
 
 # backend
