@@ -18,6 +18,7 @@ export default function App() {
   const [news, setNews] = useState([])
   const [issueNews, setIssueNews] = useState([])
   const [newsCategories, setNewsCategories] = useState([])
+  const [splitStats, setSplitStats] = useState({ market: 0, issues: 0 })
   const [newsQ, setNewsQ] = useState(localStorage.getItem('news_q') || '')
   const [newsCategory, setNewsCategory] = useState(localStorage.getItem('news_category') || '')
   const [newsSource, setNewsSource] = useState(localStorage.getItem('news_source') || '')
@@ -66,12 +67,14 @@ export default function App() {
       if (newsCategory) qs.set('category', newsCategory)
       if (newsSource) qs.set('source', newsSource)
       if (newsQ) qs.set('q', newsQ)
-      const [n, c] = await Promise.all([
+      const [n, c, st] = await Promise.all([
         apiGet(`/api/news/market?${qs.toString()}`),
-        apiGet('/api/news/categories')
+        apiGet('/api/news/categories'),
+        apiGet(`/api/news/split-stats?days=${newsDays}`)
       ])
       setNews(n.items || [])
       setNewsCategories(c.items || [])
+      setSplitStats(st || { market: 0, issues: 0 })
     } catch (e) {
       setError('뉴스 조회 오류: ' + e.message)
     }
@@ -80,8 +83,12 @@ export default function App() {
   const loadIssueNews = async () => {
     try {
       setError('')
-      const s = await apiGet(`/api/news/others?limit=50&days=${newsDays}`)
+      const [s, st] = await Promise.all([
+        apiGet(`/api/news/others?limit=50&days=${newsDays}`),
+        apiGet(`/api/news/split-stats?days=${newsDays}`)
+      ])
       setIssueNews(s.items || [])
+      setSplitStats(st || { market: 0, issues: 0 })
     } catch (e) {
       setError('이슈 뉴스 조회 오류: ' + e.message)
     }
@@ -345,8 +352,8 @@ export default function App() {
       {!isMobile && <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220', position:'sticky', top:0, height:'100vh' }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Dashboard</div>
         <div onClick={() => setMenu('dashboard')} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='dashboard' ? '#0b2536':'#111827', borderColor: menu==='dashboard' ? '#1f4b63':'#334155', color: menu==='dashboard' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>대시보드</span><span style={{fontSize:12, color:'#94a3b8'}}>{jobs.length}</span></div>
-        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>뉴스</span><span style={{fontSize:12, color:'#94a3b8'}}>{news.length}</span></div>
-        <div onClick={() => { setMenu('issues'); loadIssueNews() }} style={{ ...box, cursor:'pointer', background: menu==='issues' ? '#0b2536':'#111827', borderColor: menu==='issues' ? '#1f4b63':'#334155', color: menu==='issues' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>이슈</span><span style={{fontSize:12, color:'#94a3b8'}}>{issueNews.length}</span></div>
+        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>뉴스</span><span style={{fontSize:12, color:'#94a3b8'}}>{splitStats.market || news.length}</span></div>
+        <div onClick={() => { setMenu('issues'); loadIssueNews() }} style={{ ...box, cursor:'pointer', background: menu==='issues' ? '#0b2536':'#111827', borderColor: menu==='issues' ? '#1f4b63':'#334155', color: menu==='issues' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>이슈</span><span style={{fontSize:12, color:'#94a3b8'}}>{splitStats.issues || issueNews.length}</span></div>
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>

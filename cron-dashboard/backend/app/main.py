@@ -93,6 +93,25 @@ MARKET_COND = """
 
 
 
+@app.get('/api/news/split-stats')
+def news_split_stats(days: int = 30, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+    days = min(max(days, 1), 365)
+    min_ts = int(__import__('time').time() * 1000) - (days * 86400000)
+
+    row = db.execute(text(f'''
+        SELECT
+          SUM(CASE WHEN {MARKET_COND} THEN 1 ELSE 0 END) AS market_cnt,
+          SUM(CASE WHEN NOT {MARKET_COND} THEN 1 ELSE 0 END) AS issue_cnt
+        FROM news_items
+        WHERE COALESCE(published_at_ms, created_at_ms) >= :min_ts
+    '''), {'min_ts': min_ts}).mappings().first()
+
+    return {
+        'market': int((row or {}).get('market_cnt') or 0),
+        'issues': int((row or {}).get('issue_cnt') or 0),
+    }
+
+
 @app.get('/api/news/market')
 def news_market(limit: int = 50, days: int = 30, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     lim = min(max(limit, 1), 200)
