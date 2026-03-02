@@ -11,6 +11,8 @@ const PORT = Number(process.env.CRON_DASHBOARD_PORT || 8088);
 const DB_USER = process.env.CRON_DB_USER || 'guidda';
 const DB_PASS = process.env.CRON_DB_PASS || '!q1w2e3r4t5';
 const DB_NAME = process.env.CRON_DB_NAME || 'internal_db';
+const AUTH_USER = process.env.CRON_DASHBOARD_AUTH_USER || '';
+const AUTH_PASS = process.env.CRON_DASHBOARD_AUTH_PASS || '';
 
 function run(cmd) {
   return new Promise((resolve, reject) => {
@@ -19,6 +21,29 @@ function run(cmd) {
       resolve(stdout);
     });
   });
+}
+
+
+function unauthorized(res) {
+  res.writeHead(401, {
+    'content-type': 'application/json; charset=utf-8',
+    'www-authenticate': 'Basic realm="cron-dashboard"'
+  });
+  res.end(JSON.stringify({ error: 'unauthorized' }));
+}
+
+function checkAuth(req, res) {
+  if (!AUTH_USER || !AUTH_PASS) return true;
+  const h = req.headers['authorization'] || '';
+  if (!h.startsWith('Basic ')) { unauthorized(res); return false; }
+  try {
+    const raw = Buffer.from(h.slice(6), 'base64').toString('utf8');
+    const idx = raw.indexOf(':');
+    const u = idx >= 0 ? raw.slice(0, idx) : raw;
+    const p = idx >= 0 ? raw.slice(idx + 1) : '';
+    if (u === AUTH_USER && p === AUTH_PASS) return true;
+  } catch {}
+  unauthorized(res); return false;
 }
 
 function safe(v) {
@@ -150,6 +175,17 @@ SELECT
   };
 }
 
+
+async function getJobRaw(id) {
+  const jobId = safe(id);
+  if (!jobId) return null;
+  const rows = await queryRows(`
+SELECT raw_json FROM cron_jobs WHERE id='${jobId}' LIMIT 1;
+`);
+  if (!rows.length) return null;
+  return rows[0][0] || null;
+}
+
 function pageHtml() {
   return `<!doctype html>
 <html lang="ko">
@@ -236,9 +272,14 @@ pre{margin:0;background:#0b1220;border:1px solid var(--line);border-radius:8px;p
 
       <div class="card">
         <h2 id="detailTitle">상세</h2>
+        <div style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button id="tabInfo">기본정보</button>
+          <button id="tabRuns">실행이력</button>
+          <button id="tabRaw">Raw JSON</button>
+        </div>
         <div id="detailBody" class="kv"><div>선택</div><div>좌측 목록에서 항목을 선택하세요.</div></div>
-        <h2>최근 실행 이력</h2>
         <div id="runs"></div>
+        <div style="padding:10px 14px"><pre id="rawBox" style="display:none;max-height:300px"></pre></div>
       </div>
     </div>
   </div>
@@ -250,6 +291,8 @@ const elSummary=document.getElementById('summary');
 const elDetailTitle=document.getElementById('detailTitle');
 const elDetailBody=document.getElementById('detailBody');
 const elRuns=document.getElementById('runs');
+const elRawBox=document.getElementById('rawBox');
+let activeTab='info';
 
 function fmt(ms){ if(!ms) return '-'; return new Date(ms).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}); }
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
@@ -263,6 +306,19 @@ function filterRows(){
     return hit && st;
   });
 }
+
+
+function switchTab(tab){
+  activeTab=tab;
+  elDetailBody.style.display = tab==='info' ? 'grid' : 'none';
+  elRuns.style.display = tab==='runs' ? 'block' : 'none';
+  elRawBox.style.display = tab==='raw' ? 'block' : 'none';
+}
+
+document.getElementById('tabInfo').addEventListener('click',()=>switchTab('info'));
+document.getElementById('tabRuns').addEventListener('click',()=>switchTab('runs'));
+document.getElementById('tabRaw').addEventListener('click',()=>switchTab('raw'));
+switchTab('info');
 
 function renderTable(){
   const rows=filterRows();
@@ -305,12 +361,14 @@ async function loadJobs(){
 }
 
 async function loadDetail(id){
-  const [dRes,rRes]=await Promise.all([
+  const [dRes,rRes,rawRes]=await Promise.all([
     fetch('/api/cron/jobs/'+encodeURIComponent(id)),
-    fetch('/api/cron/jobs/'+encodeURIComponent(id)+'/runs?limit=20')
+    fetch('/api/cron/jobs/'+encodeURIComponent(id)+'/runs?limit=20'),
+    fetch('/api/cron/jobs/'+encodeURIComponent(id)+'/raw')
   ]);
   const d=await dRes.json();
   const r=await rRes.json();
+  const raw=await rawRes.json();
 
   if(!d || d.error){
     elDetailTitle.textContent='상세';
@@ -333,6 +391,7 @@ async function loadDetail(id){
     '<div>Payload Message</div><div><pre>'+esc(d.payloadMessage||'')+'</pre></div>';
 
   const runs=r.runs||[];
+  try { elRawBox.textContent = (raw && raw.rawJson) ? JSON.stringify(JSON.parse(raw.rawJson), null, 2) : '-'; } catch(e){ elRawBox.textContent = (raw && raw.rawJson) ? raw.rawJson : '-'; }
   elRuns.innerHTML=runs.length? runs.map(function(x){
     return '<div class="run-item">'+
       '<div><strong>'+fmt(x.runAtMs)+'</strong> · <span class="status '+esc(String(x.status||'').toLowerCase())+'">'+esc(x.status)+'</span></div>'+
@@ -354,6 +413,7 @@ setInterval(function(){ loadSummary(); loadJobs(); }, 60000);
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (!checkAuth(req, res)) return;
     const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
     if (u.pathname === '/api/cron/jobs') {
@@ -376,6 +436,15 @@ const server = http.createServer(async (req, res) => {
         const runs = await getJobRuns(id, limit);
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ id, runs }));
+      }
+      if (seg[4] === 'raw') {
+        const rawJson = await getJobRaw(id);
+        if (!rawJson) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ error: 'not found' }));
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ id, rawJson }));
       }
       const detail = await getJobDetail(id);
       if (!detail) {
