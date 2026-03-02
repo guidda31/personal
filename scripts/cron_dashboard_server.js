@@ -81,23 +81,25 @@ function render(){
     const st=!s || String(r.status).toLowerCase()===s;
     return hit && st;
   });
-  document.getElementById('rows').innerHTML = rows.map(r=>`<tr>
-    <td>\${r.name}</td>
-    <td><code>\${r.id}</code></td>
-    <td>\${r.schedule}</td>
-    <td>\${fmt(r.nextRunAtMs)}</td>
-    <td>\${fmt(r.lastRunAtMs)}</td>
-    <td class="\${(r.status||'').toLowerCase()}">\${r.status||'-'}</td>
-    <td>\${r.target}</td>
-    <td>\${r.agent}</td>
-    <td>\${r.enabled?'Y':'N'}</td>
-  </tr>`).join('');
+  document.getElementById('rows').innerHTML = rows.map(r=>
+    '<tr>'+
+    '<td>'+r.name+'</td>'+
+    '<td><code>'+r.id+'</code></td>'+
+    '<td>'+r.schedule+'</td>'+
+    '<td>'+fmt(r.nextRunAtMs)+'</td>'+
+    '<td>'+fmt(r.lastRunAtMs)+'</td>'+
+    '<td class="'+String(r.status||'').toLowerCase()+'">'+(r.status||'-')+'</td>'+
+    '<td>'+r.target+'</td>'+
+    '<td>'+r.agent+'</td>'+
+    '<td>'+(r.enabled?'Y':'N')+'</td>'+
+    '</tr>'
+  ).join('');
 }
 async function load(){
   const res=await fetch('/api/cron/jobs');
   const data=await res.json();
   all=data.jobs||[];
-  document.getElementById('meta').textContent = `총 \${data.total}개 · 갱신 \${new Date(data.updatedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}`;
+  document.getElementById('meta').textContent = '총 '+data.total+'개 · 갱신 '+new Date(data.updatedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
   render();
 }
 ['q','status'].forEach(id=>document.getElementById(id).addEventListener('input', render));
