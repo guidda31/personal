@@ -3,3 +3,8 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 INFO:     127.0.0.1:51464 - "GET /api/cron/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43844 - "GET /api/cron/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43860 - "GET /api/cron/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43844 - "GET /api/cron/jobs/e85c8ba1-b786-488f-8a23-d99518d389b1/runs?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43860 - "GET /api/cron/jobs/e85c8ba1-b786-488f-8a23-d99518d389b1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43872 - "GET /api/cron/jobs/e85c8ba1-b786-488f-8a23-d99518d389b1/raw HTTP/1.1" 200 OK
