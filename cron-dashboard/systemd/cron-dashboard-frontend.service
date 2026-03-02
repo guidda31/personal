@@ -1,0 +1,14 @@
+[Unit]
+Description=Cron Dashboard Frontend (Vite)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/guidda/.openclaw/workspace/cron-dashboard/frontend
+ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0 --port 5173
+Restart=always
+RestartSec=2
+EnvironmentFile=-/home/guidda/.openclaw/workspace/cron-dashboard/frontend/.env
+
+[Install]
+WantedBy=multi-user.target

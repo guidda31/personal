@@ -33,6 +33,16 @@
 /home/guidda/.openclaw/workspace/cron-dashboard/tailnet_access_check.sh
 ```
 
+## systemd 서비스화(선택)
+서비스 유닛 파일:
+- `systemd/cron-dashboard-backend.service`
+- `systemd/cron-dashboard-frontend.service`
+
+설치 스크립트(관리자 권한 필요):
+```bash
+/home/guidda/.openclaw/workspace/cron-dashboard/systemd/install_services.sh
+```
+
 ## API (FastAPI)
 ### Dashboard
 - `GET /api/cron/summary`
