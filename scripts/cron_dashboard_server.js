@@ -4,6 +4,9 @@ const { exec } = require('child_process');
 
 const HOST = process.env.CRON_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.CRON_DASHBOARD_PORT || 8088);
+const DB_USER = process.env.CRON_DB_USER || 'guidda';
+const DB_PASS = process.env.CRON_DB_PASS || '!q1w2e3r4t5';
+const DB_NAME = process.env.CRON_DB_NAME || 'internal_db';
 
 function run(cmd) {
   return new Promise((resolve, reject) => {
@@ -15,20 +18,28 @@ function run(cmd) {
 }
 
 async function getCronJobs() {
-  const raw = await run('openclaw cron list --json');
-  const parsed = JSON.parse(raw);
-  const jobs = (parsed.jobs || []).map((j) => ({
-    id: j.id,
-    name: j.name,
-    schedule: `${j.schedule?.expr || ''} @ ${j.schedule?.tz || ''}`,
-    nextRunAtMs: j.state?.nextRunAtMs || null,
-    lastRunAtMs: j.state?.lastRunAtMs || null,
-    status: j.state?.lastStatus || j.state?.lastRunStatus || 'idle',
-    target: j.sessionTarget || '-',
-    agent: j.agentId || '-',
-    enabled: !!j.enabled,
-  }));
-  return { total: jobs.length, jobs, updatedAt: Date.now() };
+  const sql = `SELECT id,name,schedule_expr,schedule_tz,next_run_at_ms,last_run_at_ms,status,target,agent,enabled,updated_at_ms FROM cron_jobs ORDER BY name ASC;`;
+  const out = await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -N -B -e ${JSON.stringify(sql)}`);
+  const lines = out.trim() ? out.trim().split('\n') : [];
+
+  const jobs = lines.map((line) => {
+    const [id, name, expr, tz, next, last, status, target, agent, enabled, updated] = line.split('\t');
+    return {
+      id,
+      name,
+      schedule: `${expr || ''} @ ${tz || ''}`,
+      nextRunAtMs: next ? Number(next) : null,
+      lastRunAtMs: last ? Number(last) : null,
+      status: status || 'idle',
+      target: target || '-',
+      agent: agent || '-',
+      enabled: enabled === '1',
+      updatedAtMs: updated ? Number(updated) : null,
+    };
+  });
+
+  const updatedAt = jobs.reduce((m, j) => Math.max(m, j.updatedAtMs || 0), 0) || Date.now();
+  return { total: jobs.length, jobs, updatedAt };
 }
 
 function pageHtml() {
@@ -52,7 +63,7 @@ function pageHtml() {
   </style>
 </head>
 <body>
-  <h1>OpenClaw Cron Dashboard</h1>
+  <h1>OpenClaw Cron Dashboard (DB)</h1>
   <div class="top">
     <input id="q" placeholder="이름/ID 검색" />
     <select id="status">
@@ -99,7 +110,7 @@ async function load(){
   const res=await fetch('/api/cron/jobs');
   const data=await res.json();
   all=data.jobs||[];
-  document.getElementById('meta').textContent = '총 '+data.total+'개 · 갱신 '+new Date(data.updatedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
+  document.getElementById('meta').textContent = '총 '+data.total+'개 · DB 갱신 '+new Date(data.updatedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
   render();
 }
 ['q','status'].forEach(id=>document.getElementById(id).addEventListener('input', render));
