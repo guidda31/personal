@@ -1,5 +1,7 @@
 import os
+import json
 import secrets
+from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -81,14 +83,41 @@ def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depen
     }
 
 
-MARKET_COND = """
-(
-  source LIKE '%krx%' OR source LIKE '%invest-monitor%' OR source LIKE '%surge-watch%'
-  OR title LIKE '%증시%' OR title LIKE '%주식%' OR title LIKE '%KRX%' OR title LIKE '%코스피%' OR title LIKE '%코스닥%'
-  OR title LIKE '%종목%' OR title LIKE '%목표가%' OR title LIKE '%손절%' OR title LIKE '%수급%'
-  OR title LIKE '%시황%'
-)
-"""
+def _esc_like(v: str) -> str:
+    return v.replace("'", "''")
+
+
+def _load_news_rules() -> dict:
+    default_rules = {
+        'market': {
+            'source_contains': ['krx', 'invest-monitor', 'surge-watch'],
+            'title_contains': ['증시', '주식', 'KRX', '코스피', '코스닥', '종목', '목표가', '손절', '수급', '시황'],
+        }
+    }
+    p = Path(__file__).resolve().parent.parent / 'news_rules.json'
+    try:
+        if p.exists():
+            data = json.loads(p.read_text(encoding='utf-8'))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return default_rules
+
+
+def _build_market_cond() -> str:
+    rules = _load_news_rules().get('market', {})
+    src = rules.get('source_contains', []) or []
+    tit = rules.get('title_contains', []) or []
+    clauses = []
+    clauses += [f"source LIKE '%{_esc_like(x)}%'" for x in src if x]
+    clauses += [f"title LIKE '%{_esc_like(x)}%'" for x in tit if x]
+    if not clauses:
+        clauses = ["1=0"]
+    return "(\n  " + " OR ".join(clauses) + "\n)"
+
+
+MARKET_COND = _build_market_cond()
 
 
 
