@@ -52,6 +52,10 @@
     "excel-xlsx": {
       "version": "1.0.1",
       "installedAt": 1772356933668
+    },
+    "yt-dlp": {
+      "version": "1.0.1",
+      "installedAt": 1772422852299
     }
   }
 }
