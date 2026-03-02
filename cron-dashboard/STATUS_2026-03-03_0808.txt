@@ -1,0 +1,29 @@
+[cron-dashboard 진행 상태 요약]
+시각: 2026-03-03 08:08 KST
+
+1) 아키텍처
+- FE/BE 분리 완료
+  - Frontend: React+Vite (5173)
+  - Backend: FastAPI (8000)
+  - DB: MariaDB internal_db
+
+2) 메뉴 구조
+- 대시보드: 크론 운영 모니터링
+- 뉴스: 정보성 브리핑/요약 아카이브
+
+3) 데이터 파이프라인
+- cron 수집: backend/collector.py (1분 주기)
+- 뉴스 적재: backend/news_ingest_from_runs.py (5분 주기)
+
+4) 인증/접속
+- Basic Auth 지원 (ON/OFF 스크립트 제공)
+- Tailnet IP 고정 접근 가이드 적용
+
+5) 현재 상태
+- 핵심 기능 개발 완료
+- 운영 스크립트/헬스체크/배포체크리스트 반영 완료
+
+6) 다음 추천 작업
+- Tailwind 리디자인(선택)
+- systemd 서비스화(backend/frontend)
+- 뉴스 원문 링크/카테고리 고도화
