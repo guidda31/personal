@@ -15,7 +15,7 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 
 nohup env CRON_DASHBOARD_PORT="$PORT" CRON_DASHBOARD_HOST="$HOST" \
-  node /home/guidda/.openclaw/workspace/scripts/cron_dashboard_server.js \
+  node /home/guidda/.openclaw/workspace/project/cron-dashboard/cron_dashboard_server.js \
   >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
