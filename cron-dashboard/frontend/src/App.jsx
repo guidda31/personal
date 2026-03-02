@@ -3,7 +3,7 @@ import SummaryCards from './components/SummaryCards'
 import JobsTable from './components/JobsTable'
 import DetailPanel from './components/DetailPanel'
 
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+const API = import.meta.env.VITE_API_BASE || ''
 const box = { border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#111827' }
 
 function makeAuthHeader(user, pass) {
