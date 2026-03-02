@@ -229,14 +229,16 @@ function filterRows(){
 
 function renderTable(){
   const rows=filterRows();
-  elRows.innerHTML=rows.map(r=>`<tr data-id="${r.id}" class="${selectedId===r.id?'active':''}">
-    <td><strong>${esc(r.name)}</strong><div class="meta">${esc(r.id)}</div></td>
-    <td class="status ${esc(String(r.status||'').toLowerCase())}">${esc(r.status||'-')}</td>
-    <td>${fmt(r.nextRunAtMs)}</td>
-    <td>${fmt(r.lastRunAtMs)}</td>
-    <td>${esc(r.schedule)}</td>
-    <td>${esc(r.agent||'-')}</td>
-  </tr>`).join('');
+  elRows.innerHTML=rows.map(function(r){
+    return '<tr data-id="'+r.id+'" class="'+(selectedId===r.id?'active':'')+'">'+
+      '<td><strong>'+esc(r.name)+'</strong><div class="meta">'+esc(r.id)+'</div></td>'+
+      '<td class="status '+esc(String(r.status||'').toLowerCase())+'">'+esc(r.status||'-')+'</td>'+
+      '<td>'+fmt(r.nextRunAtMs)+'</td>'+
+      '<td>'+fmt(r.lastRunAtMs)+'</td>'+
+      '<td>'+esc(r.schedule)+'</td>'+
+      '<td>'+esc(r.agent||'-')+'</td>'+
+    '</tr>';
+  }).join('');
 
   [...elRows.querySelectorAll('tr')].forEach(tr=>{
     tr.onclick=()=>{ selectedId=tr.dataset.id; renderTable(); loadDetail(selectedId); };
@@ -247,7 +249,7 @@ async function loadJobs(){
   const res=await fetch('/api/cron/jobs');
   const data=await res.json();
   all=data.jobs||[];
-  elMeta.textContent=`총 ${data.total}개 · DB 갱신 ${fmt(data.updatedAt)}`;
+  elMeta.textContent='총 '+data.total+'개 · DB 갱신 '+fmt(data.updatedAt);
   if(!selectedId && all.length) selectedId=all[0].id;
   renderTable();
   if(selectedId) loadDetail(selectedId);
@@ -268,26 +270,27 @@ async function loadDetail(id){
     return;
   }
 
-  elDetailTitle.textContent=`상세 · ${d.name}`;
-  elDetailBody.innerHTML=`
-    <div>ID</div><div><code>${esc(d.id)}</code></div>
-    <div>Enabled</div><div>${d.enabled?'Y':'N'}</div>
-    <div>Status</div><div class="status ${esc(String(d.status||'').toLowerCase())}">${esc(d.status||'-')}</div>
-    <div>Schedule</div><div>${esc(d.scheduleExpr||'')} @ ${esc(d.scheduleTz||'')}</div>
-    <div>Next / Last</div><div>${fmt(d.nextRunAtMs)} / ${fmt(d.lastRunAtMs)}</div>
-    <div>Duration / Errors</div><div>${d.lastDurationMs||'-'} ms / ${d.consecutiveErrors||0}</div>
-    <div>Agent / Target</div><div>${esc(d.agentId||'-')} / ${esc(d.sessionTarget||'-')}</div>
-    <div>Delivery</div><div>${esc(d.deliveryMode||'-')} / ${esc(d.deliveryChannel||'-')} / ${esc(d.deliveryTo||'-')}</div>
-    <div>Payload Kind</div><div>${esc(d.payloadKind||'-')}</div>
-    <div>Payload Message</div><div><pre>${esc(d.payloadMessage||'')}</pre></div>
-  `;
+  elDetailTitle.textContent='상세 · '+d.name;
+  elDetailBody.innerHTML=
+    '<div>ID</div><div><code>'+esc(d.id)+'</code></div>'+
+    '<div>Enabled</div><div>'+(d.enabled?'Y':'N')+'</div>'+
+    '<div>Status</div><div class="status '+esc(String(d.status||'').toLowerCase())+'">'+esc(d.status||'-')+'</div>'+
+    '<div>Schedule</div><div>'+esc(d.scheduleExpr||'')+' @ '+esc(d.scheduleTz||'')+'</div>'+
+    '<div>Next / Last</div><div>'+fmt(d.nextRunAtMs)+' / '+fmt(d.lastRunAtMs)+'</div>'+
+    '<div>Duration / Errors</div><div>'+(d.lastDurationMs||'-')+' ms / '+(d.consecutiveErrors||0)+'</div>'+
+    '<div>Agent / Target</div><div>'+esc(d.agentId||'-')+' / '+esc(d.sessionTarget||'-')+'</div>'+
+    '<div>Delivery</div><div>'+esc(d.deliveryMode||'-')+' / '+esc(d.deliveryChannel||'-')+' / '+esc(d.deliveryTo||'-')+'</div>'+
+    '<div>Payload Kind</div><div>'+esc(d.payloadKind||'-')+'</div>'+
+    '<div>Payload Message</div><div><pre>'+esc(d.payloadMessage||'')+'</pre></div>';
 
   const runs=r.runs||[];
-  elRuns.innerHTML=runs.length? runs.map(x=>`<div class="run-item">
-    <div><strong>${fmt(x.runAtMs)}</strong> · <span class="status ${esc(String(x.status||'').toLowerCase())}">${esc(x.status)}</span></div>
-    <div class="meta">duration: ${x.durationMs??'-'} ms · delivered: ${x.delivered===null?'-':(x.delivered?'Y':'N')} · delivery: ${esc(x.deliveryStatus||'-')}</div>
-    <div class="meta">model: ${esc(x.model||'-')} · tokens: ${x.totalTokens??'-'}</div>
-  </div>`).join('') : '<div class="run-item">이력 없음</div>';
+  elRuns.innerHTML=runs.length? runs.map(function(x){
+    return '<div class="run-item">'+
+      '<div><strong>'+fmt(x.runAtMs)+'</strong> · <span class="status '+esc(String(x.status||'').toLowerCase())+'">'+esc(x.status)+'</span></div>'+
+      '<div class="meta">duration: '+(x.durationMs??'-')+' ms · delivered: '+(x.delivered===null?'-':(x.delivered?'Y':'N'))+' · delivery: '+esc(x.deliveryStatus||'-')+'</div>'+
+      '<div class="meta">model: '+esc(x.model||'-')+' · tokens: '+(x.totalTokens??'-')+'</div>'+
+    '</div>';
+  }).join('') : '<div class="run-item">이력 없음</div>';
 }
 
 document.getElementById('q').addEventListener('input', renderTable);
