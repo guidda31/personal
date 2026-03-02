@@ -209,6 +209,7 @@ body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--tex
 input,select,button{background:#0b1220;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 button{cursor:pointer}
 button:hover{border-color:#4b5563}
+.tab-btn.active{border-color:#38bdf8;color:#7dd3fc;background:#0b2536}
 .summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
 .summary .box{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:10px}
 .summary .k{font-size:11px;color:var(--muted)}
@@ -273,9 +274,9 @@ pre{margin:0;background:#0b1220;border:1px solid var(--line);border-radius:8px;p
       <div class="card">
         <h2 id="detailTitle">상세</h2>
         <div style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap">
-          <button id="tabInfo">기본정보</button>
-          <button id="tabRuns">실행이력</button>
-          <button id="tabRaw">Raw JSON</button>
+          <button class="tab-btn" id="tabInfo">기본정보</button>
+          <button class="tab-btn" id="tabRuns">실행이력</button>
+          <button class="tab-btn" id="tabRaw">Raw JSON</button>
         </div>
         <div id="detailBody" class="kv"><div>선택</div><div>좌측 목록에서 항목을 선택하세요.</div></div>
         <div id="runs"></div>
@@ -313,6 +314,12 @@ function switchTab(tab){
   elDetailBody.style.display = tab==='info' ? 'grid' : 'none';
   elRuns.style.display = tab==='runs' ? 'block' : 'none';
   elRawBox.style.display = tab==='raw' ? 'block' : 'none';
+  ['tabInfo','tabRuns','tabRaw'].forEach(function(id){
+    const el=document.getElementById(id);
+    if(!el) return;
+    const on=(id==='tabInfo'&&tab==='info')||(id==='tabRuns'&&tab==='runs')||(id==='tabRaw'&&tab==='raw');
+    if(on) el.classList.add('active'); else el.classList.remove('active');
+  });
 }
 
 document.getElementById('tabInfo').addEventListener('click',()=>switchTab('info'));
@@ -361,6 +368,7 @@ async function loadJobs(){
 }
 
 async function loadDetail(id){
+  switchTab(activeTab || 'info');
   const [dRes,rRes,rawRes]=await Promise.all([
     fetch('/api/cron/jobs/'+encodeURIComponent(id)),
     fetch('/api/cron/jobs/'+encodeURIComponent(id)+'/runs?limit=20'),
