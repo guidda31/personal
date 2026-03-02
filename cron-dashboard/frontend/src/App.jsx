@@ -158,6 +158,12 @@ export default function App() {
       return newsSort === 'latest' ? tb - ta : ta - tb
     })
 
+    const sourceCount = sorted.reduce((acc, n) => {
+      const s = n.source || 'unknown'
+      acc[s] = (acc[s] || 0) + 1
+      return acc
+    }, {})
+
     return (
       <>
         <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
@@ -175,6 +181,12 @@ export default function App() {
             <option value='oldest'>오래된순</option>
           </select>
           <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          {Object.entries(sourceCount).slice(0, 8).map(([s, c]) => (
+            <span key={s} style={{ ...box, padding: '4px 8px', fontSize: 12, color: '#cbd5e1' }}>{s} {c}</span>
+          ))}
         </div>
         <div style={box}>
           {sorted.length === 0 ? <div style={{ color: '#94a3b8' }}>조건에 맞는 뉴스가 없습니다.</div> : sorted.map((n) => {
