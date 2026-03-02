@@ -374,7 +374,14 @@ def run_once(dry_run: bool, confirm: str | None):
                             raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                         res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
                         log_event("stoploss_sell", {"result": res}, notify=True)
-                    state.update({"entered": False, "qty": 0})
+
+                    trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                    if daily_loss_guard(state):
+                        state["trading_disabled_today"] = True
+                        log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
+
+                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0})
                     save_state(state)
 
         # force close 15:15~15:19 (continuous only)
@@ -388,7 +395,14 @@ def run_once(dry_run: bool, confirm: str | None):
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
                 log_event("eod_close_sell", {"result": res}, notify=True)
-            state.update({"entered": False, "qty": 0})
+
+            trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+            state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+            if daily_loss_guard(state):
+                state["trading_disabled_today"] = True
+                log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
+
+            state.update({"entered": False, "qty": 0, "entry_legs_done": 0})
             save_state(state)
 
 

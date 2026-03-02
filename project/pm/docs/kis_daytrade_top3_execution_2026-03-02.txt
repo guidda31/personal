@@ -1,0 +1,31 @@
+[업무 분배 및 실행 결과 | 2026-03-02]
+
+1) 업무 분배
+- PM: 목표/우선순위 확정 (Top3: 분할진입, 동적사이징, 일일손실한도)
+- PL: 반영 설계 승인 및 runner.py 변경 가이드
+- Developer: runner.py 실제 구현
+- Tester: 문법/실행 스모크 검증
+
+2) 실제 코드 반영 파일
+- kis-openapi/runner.py
+
+3) 반영 기능
+- 분할 진입(TWAP-lite): DT_ENTRY_SPLITS(기본 40,35,25), DT_ENTRY_SPLIT_INTERVAL_SEC(기본 45초)
+- 동적 포지션 사이즈: 변동성 레짐(high/mid/low)에 따른 cash fraction 적용
+  - 기본: low=1.0, mid=0.6, high=0.35
+  - env: DT_POSITION_FRACTION_LOW/MID/HIGH
+- 일일 손실 한도(Daily Stop): realized_pnl_pct 누적, 한도 도달 시 당일 신규진입 차단
+  - env: DT_DAILY_MAX_LOSS_PCT (기본 2.5)
+
+4) 상태(state) 확장
+- realized_pnl_pct
+- trading_disabled_today
+- entry_legs_done
+
+5) 검증
+- python3 -m py_compile kis-openapi/runner.py 통과
+- python3 kis-openapi/runner.py --dry-run 실행 확인
+
+6) 주의
+- 실거래 반영 전 .env 파라미터 값 검토 필요
+- 장중 로그 기준으로 분할진입 leg 체결/누적 손익 업데이트 재점검 권장
