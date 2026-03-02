@@ -166,6 +166,10 @@ export default function App() {
       return acc
     }, {})
 
+    const uniqueSources = Object.keys(sourceCount).length
+    const latestTs = sorted[0]?.publishedAtMs || sorted[0]?.createdAtMs || null
+    const oldestTs = sorted[sorted.length - 1]?.publishedAtMs || sorted[sorted.length - 1]?.createdAtMs || null
+
     return (
       <>
         <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
@@ -184,6 +188,13 @@ export default function App() {
           </select>
           <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
           <button onClick={() => { setNewsQ(''); setNewsCategory(''); setNewsSource('') }} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>필터 초기화</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>총 {sorted.length}건</span>
+          <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>소스 {uniqueSources}개</span>
+          <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최신 {latestTs ? new Date(latestTs).toLocaleDateString('ko-KR') : '-'}</span>
+          <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최초 {oldestTs ? new Date(oldestTs).toLocaleDateString('ko-KR') : '-'}</span>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -210,6 +221,12 @@ export default function App() {
                       {expanded ? '요약 접기' : '요약 펼치기'}
                     </button>
                   )}
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(`${n.title}\n\n${body}`)}
+                    style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#e5e7eb', fontSize: 12 }}
+                  >
+                    요약 복사
+                  </button>
                   {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
                 </div>
               </div>
