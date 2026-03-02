@@ -289,6 +289,10 @@ def run_once(dry_run: bool, confirm: str | None):
         b = client.get_balance()
         cash = int((b.get("output2") or [{}])[0].get("dnca_tot_amt", "0"))
         usable_cash = int(cash * frac)
+        # hard cap per-symbol exposure (percent of available cash)
+        max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
+        symbol_cap_cash = int(cash * (max_symbol_exposure_pct / 100.0))
+        usable_cash = min(usable_cash, symbol_cap_cash)
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
         interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
@@ -307,6 +311,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 "position_fraction": frac,
                 "cash": cash,
                 "usable_cash": usable_cash,
+                "max_symbol_exposure_pct": max_symbol_exposure_pct,
                 "splits": splits,
             },
             notify=True,
