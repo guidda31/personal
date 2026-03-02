@@ -1,6 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
 const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+const AUTH_USER = import.meta.env.VITE_AUTH_USER || ''
+const AUTH_PASS = import.meta.env.VITE_AUTH_PASS || ''
+
+async function apiGet(path) {
+  const headers = {}
+  if (AUTH_USER && AUTH_PASS) {
+    headers['Authorization'] = 'Basic ' + btoa(`${AUTH_USER}:${AUTH_PASS}`)
+  }
+  const res = await fetch(`${API}${path}`, { headers })
+  if (!res.ok) throw new Error(`API ${res.status}`)
+  return res.json()
+}
 
 const box = { border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#111827' }
 const fmt = (ms) => (ms ? new Date(ms).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-')
@@ -15,27 +27,37 @@ export default function App() {
   const [runs, setRuns] = useState([])
   const [raw, setRaw] = useState('')
   const [tab, setTab] = useState('info')
+  const [error, setError] = useState('')
 
   async function loadSummaryAndJobs() {
-    const [s, j] = await Promise.all([
-      fetch(`${API}/api/cron/summary`).then(r => r.json()),
-      fetch(`${API}/api/cron/jobs`).then(r => r.json()),
-    ])
-    setSummary(s)
-    setJobs(j.jobs || [])
-    if (!selectedId && (j.jobs || []).length) setSelectedId(j.jobs[0].id)
+    try {
+      setError('')
+      const [s, j] = await Promise.all([
+        apiGet('/api/cron/summary'),
+        apiGet('/api/cron/jobs'),
+      ])
+      setSummary(s)
+      setJobs(j.jobs || [])
+      if (!selectedId && (j.jobs || []).length) setSelectedId(j.jobs[0].id)
+    } catch (e) {
+      setError('API 인증 또는 연결 오류: ' + e.message)
+    }
   }
 
   async function loadDetail(id) {
     if (!id) return
-    const [d, r, rw] = await Promise.all([
-      fetch(`${API}/api/cron/jobs/${id}`).then(x => x.json()),
-      fetch(`${API}/api/cron/jobs/${id}/runs?limit=20`).then(x => x.json()),
-      fetch(`${API}/api/cron/jobs/${id}/raw`).then(x => x.json()),
-    ])
-    setDetail(d)
-    setRuns(r.runs || [])
-    setRaw(rw.rawJson || '')
+    try {
+      const [d, r, rw] = await Promise.all([
+        apiGet(`/api/cron/jobs/${id}`),
+        apiGet(`/api/cron/jobs/${id}/runs?limit=20`),
+        apiGet(`/api/cron/jobs/${id}/raw`),
+      ])
+      setDetail(d)
+      setRuns(r.runs || [])
+      setRaw(rw.rawJson || '')
+    } catch (e) {
+      setError('상세 조회 오류: ' + e.message)
+    }
   }
 
   useEffect(() => { loadSummaryAndJobs() }, [])
@@ -50,6 +72,7 @@ export default function App() {
   return (
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', padding: 20, background: '#0f172a', minHeight: '100vh', color: '#e5e7eb' }}>
       <h1 style={{ marginTop: 0 }}>Cron Dashboard (FE/BE 분리)</h1>
+      {error && <div style={{...box, borderColor:'#7f1d1d', color:'#fca5a5', marginBottom:10}}>{error}</div>}
 
       {summary && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,minmax(0,1fr))', gap: 8, marginBottom: 12 }}>
