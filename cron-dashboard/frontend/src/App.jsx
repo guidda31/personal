@@ -23,8 +23,8 @@ export default function App() {
   const [newsDays, setNewsDays] = useState(Number(localStorage.getItem('news_days') || 30))
   const [newsSort, setNewsSort] = useState('latest')
   const [expandedNews, setExpandedNews] = useState({})
-  const [q, setQ] = useState('')
-  const [status, setStatus] = useState('')
+  const [q, setQ] = useState(localStorage.getItem('dash_q') || '')
+  const [status, setStatus] = useState(localStorage.getItem('dash_status') || '')
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState(null)
   const [runs, setRuns] = useState([])
@@ -136,6 +136,11 @@ export default function App() {
     localStorage.setItem('news_source', newsSource)
     localStorage.setItem('news_days', String(newsDays))
   }, [newsQ, newsCategory, newsSource, newsDays])
+
+  useEffect(() => {
+    localStorage.setItem('dash_q', q)
+    localStorage.setItem('dash_status', status)
+  }, [q, status])
 
   const filtered = useMemo(() => jobs.filter((j) => {
     const hit = !q || j.name.toLowerCase().includes(q.toLowerCase()) || j.id.toLowerCase().includes(q.toLowerCase())
@@ -285,6 +290,12 @@ export default function App() {
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
+        {isMobile && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <button onClick={() => setMenu('dashboard')} style={{ ...box, cursor: 'pointer', color: menu==='dashboard' ? '#7dd3fc' : '#e5e7eb', background: menu==='dashboard' ? '#0b2536' : '#111827' }}>대시보드</button>
+            <button onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor: 'pointer', color: menu==='news' ? '#7dd3fc' : '#e5e7eb', background: menu==='news' ? '#0b2536' : '#111827' }}>뉴스</button>
+          </div>
+        )}
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
 
         <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto auto auto', gap: 8 }}>
