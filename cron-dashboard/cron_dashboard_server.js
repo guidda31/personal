@@ -129,6 +129,27 @@ LIMIT ${lim};
   }));
 }
 
+async function getSummary() {
+  const rows = await queryRows(`
+SELECT
+  (SELECT COUNT(*) FROM cron_jobs) AS total_jobs,
+  (SELECT COUNT(*) FROM cron_jobs WHERE enabled=1) AS enabled_jobs,
+  (SELECT COUNT(*) FROM cron_jobs WHERE status='ok') AS ok_jobs,
+  (SELECT COUNT(*) FROM cron_jobs WHERE status='idle') AS idle_jobs,
+  (SELECT COUNT(*) FROM cron_jobs WHERE status='error') AS error_jobs,
+  (SELECT COUNT(*) FROM cron_job_runs WHERE run_at_ms >= (UNIX_TIMESTAMP()*1000 - 86400000)) AS runs_24h;
+`);
+  const r = rows[0] || [];
+  return {
+    totalJobs: Number(r[0] || 0),
+    enabledJobs: Number(r[1] || 0),
+    okJobs: Number(r[2] || 0),
+    idleJobs: Number(r[3] || 0),
+    errorJobs: Number(r[4] || 0),
+    runs24h: Number(r[5] || 0),
+  };
+}
+
 function pageHtml() {
   return `<!doctype html>
 <html lang="ko">
@@ -152,6 +173,10 @@ body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--tex
 input,select,button{background:#0b1220;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 button{cursor:pointer}
 button:hover{border-color:#4b5563}
+.summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.summary .box{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:10px}
+.summary .k{font-size:11px;color:var(--muted)}
+.summary .v{font-size:18px;font-weight:700}
 .layout{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .card h2{font-size:14px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line);color:#cbd5e1}
@@ -194,6 +219,8 @@ pre{margin:0;background:#0b1220;border:1px solid var(--line);border-radius:8px;p
       <button id="refresh">새로고침</button>
     </div>
 
+    <div class="summary" id="summary"></div>
+
     <div class="layout">
       <div class="card">
         <h2>목록</h2>
@@ -219,6 +246,7 @@ pre{margin:0;background:#0b1220;border:1px solid var(--line);border-radius:8px;p
 let all=[]; let selectedId=null;
 const elRows=document.getElementById('rows');
 const elMeta=document.getElementById('meta');
+const elSummary=document.getElementById('summary');
 const elDetailTitle=document.getElementById('detailTitle');
 const elDetailBody=document.getElementById('detailBody');
 const elRuns=document.getElementById('runs');
@@ -252,6 +280,18 @@ function renderTable(){
   [...elRows.querySelectorAll('tr')].forEach(tr=>{
     tr.onclick=()=>{ selectedId=tr.dataset.id; renderTable(); loadDetail(selectedId); };
   });
+}
+
+async function loadSummary(){
+  const res=await fetch('/api/cron/summary');
+  const s=await res.json();
+  elSummary.innerHTML =
+    '<div class="box"><div class="k">TOTAL</div><div class="v">'+(s.totalJobs||0)+'</div></div>'+
+    '<div class="box"><div class="k">ENABLED</div><div class="v">'+(s.enabledJobs||0)+'</div></div>'+
+    '<div class="box"><div class="k">OK</div><div class="v" style="color:#22c55e">'+(s.okJobs||0)+'</div></div>'+
+    '<div class="box"><div class="k">IDLE</div><div class="v" style="color:#f59e0b">'+(s.idleJobs||0)+'</div></div>'+
+    '<div class="box"><div class="k">ERROR</div><div class="v" style="color:#ef4444">'+(s.errorJobs||0)+'</div></div>'+
+    '<div class="box"><div class="k">RUNS 24H</div><div class="v">'+(s.runs24h||0)+'</div></div>';
 }
 
 async function loadJobs(){
