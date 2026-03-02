@@ -16,6 +16,9 @@ export default function App() {
   const [summary, setSummary] = useState(null)
   const [jobs, setJobs] = useState([])
   const [news, setNews] = useState([])
+  const [newsQ, setNewsQ] = useState('')
+  const [newsCategory, setNewsCategory] = useState('')
+  const [newsDays, setNewsDays] = useState(30)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [selectedId, setSelectedId] = useState('')
@@ -53,7 +56,10 @@ export default function App() {
   const loadNews = async () => {
     try {
       setError('')
-      const n = await apiGet('/api/news?limit=50')
+      const qs = new URLSearchParams({ limit: '50', days: String(newsDays) })
+      if (newsCategory) qs.set('category', newsCategory)
+      if (newsQ) qs.set('q', newsQ)
+      const n = await apiGet(`/api/news?${qs.toString()}`)
       setNews(n.items || [])
     } catch (e) {
       setError('뉴스 조회 오류: ' + e.message)
@@ -147,11 +153,18 @@ export default function App() {
     <>
       <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
       <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px auto', gap: 8, marginBottom: 12 }}>
+        <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
+        <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
+        <select value={newsDays} onChange={(e) => setNewsDays(Number(e.target.value))} style={{ ...box, color: '#e5e7eb' }}>
+          <option value={7}>최근 7일</option>
+          <option value={30}>최근 30일</option>
+          <option value={90}>최근 90일</option>
+        </select>
         <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
       </div>
       <div style={box}>
-        {news.length === 0 ? <div style={{ color: '#94a3b8' }}>아직 적재된 뉴스가 없습니다.</div> : news.map((n) => (
+        {news.length === 0 ? <div style={{ color: '#94a3b8' }}>조건에 맞는 뉴스가 없습니다.</div> : news.map((n) => (
           <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
             <div style={{ fontWeight: 700 }}>{n.title}</div>
             <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>

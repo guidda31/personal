@@ -57,14 +57,37 @@ def auth_guard(credentials: HTTPBasicCredentials | None = Depends(security)):
 
 
 @app.get('/api/news')
-def news_list(limit: int = 30, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+def news_list(
+    limit: int = 30,
+    category: str | None = None,
+    q: str | None = None,
+    days: int = 30,
+    _: bool = Depends(auth_guard),
+    db: Session = Depends(get_db),
+):
     lim = min(max(limit, 1), 200)
-    rows = db.execute(text('''
+    days = min(max(days, 1), 365)
+    min_ts = int(__import__('time').time() * 1000) - (days * 86400000)
+
+    where = ['COALESCE(published_at_ms, created_at_ms) >= :min_ts']
+    params = {'lim': lim, 'min_ts': min_ts}
+
+    if category:
+        where.append('category = :category')
+        params['category'] = category
+    if q:
+        where.append('(title LIKE :q OR summary LIKE :q OR source LIKE :q)')
+        params['q'] = f'%{q}%'
+
+    sql = f'''
         SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
         FROM news_items
+        WHERE {' AND '.join(where)}
         ORDER BY COALESCE(published_at_ms, created_at_ms) DESC
         LIMIT :lim
-    '''), {'lim': lim}).mappings().all()
+    '''
+
+    rows = db.execute(text(sql), params).mappings().all()
     items = [{
         'id': r['id'], 'title': r['title'], 'source': r['source'], 'category': r['category'],
         'summary': r['summary'], 'url': r['url'], 'publishedAtMs': r['published_at_ms'], 'createdAtMs': r['created_at_ms']
