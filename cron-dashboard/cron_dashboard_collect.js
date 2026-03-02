@@ -38,31 +38,33 @@ async function ensureSchema() {
 CREATE TABLE IF NOT EXISTS cron_jobs (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
-  enabled TINYINT(1) NOT NULL DEFAULT 1,
-  schedule_kind VARCHAR(16) NOT NULL DEFAULT 'cron',
   schedule_expr VARCHAR(64) NOT NULL,
   schedule_tz VARCHAR(64) NOT NULL,
-  session_target VARCHAR(32) NULL,
-  wake_mode VARCHAR(32) NULL,
-  agent_id VARCHAR(64) NULL,
-  status VARCHAR(32) NOT NULL DEFAULT 'idle',
   next_run_at_ms BIGINT NULL,
   last_run_at_ms BIGINT NULL,
-  last_duration_ms INT NULL,
-  last_delivery_status VARCHAR(64) NULL,
-  consecutive_errors INT NOT NULL DEFAULT 0,
-  payload_kind VARCHAR(32) NULL,
-  payload_message MEDIUMTEXT NULL,
-  delivery_mode VARCHAR(32) NULL,
-  delivery_channel VARCHAR(32) NULL,
-  delivery_to VARCHAR(255) NULL,
+  status VARCHAR(32) NOT NULL,
+  target VARCHAR(64) NOT NULL,
+  agent VARCHAR(64) NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
   raw_json LONGTEXT NULL,
   updated_at_ms BIGINT NOT NULL,
-  INDEX idx_jobs_status (status),
-  INDEX idx_jobs_name (name),
-  INDEX idx_jobs_next (next_run_at_ms),
-  INDEX idx_jobs_updated (updated_at_ms)
+  INDEX idx_status (status),
+  INDEX idx_name (name),
+  INDEX idx_updated (updated_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS schedule_kind VARCHAR(16) NOT NULL DEFAULT 'cron';
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS session_target VARCHAR(32) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS wake_mode VARCHAR(32) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS last_duration_ms INT NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS last_delivery_status VARCHAR(64) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS consecutive_errors INT NOT NULL DEFAULT 0;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS payload_kind VARCHAR(32) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS payload_message MEDIUMTEXT NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR(32) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS delivery_channel VARCHAR(32) NULL;
+ALTER TABLE cron_jobs ADD COLUMN IF NOT EXISTS delivery_to VARCHAR(255) NULL;
 
 CREATE TABLE IF NOT EXISTS cron_job_runs (
   run_id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -113,6 +115,8 @@ async function upsertJobs(jobs, now) {
     const id = j.id || '';
     const name = j.name || '';
     const enabled = j.enabled ? 1 : 0;
+    const target = j.sessionTarget || '-';
+    const agent = j.agentId || '-';
     const scheduleKind = j.schedule?.kind || 'cron';
     const expr = j.schedule?.expr || '';
     const tz = j.schedule?.tz || '';
@@ -132,7 +136,7 @@ async function upsertJobs(jobs, now) {
     const deliveryTo = j.delivery?.to ?? null;
     const rawJson = JSON.stringify(j);
 
-    return `(${esc(id)},${esc(name)},${enabled},${esc(scheduleKind)},${esc(expr)},${esc(tz)},${esc(sessionTarget)},${esc(wakeMode)},${esc(agentId)},${esc(status)},${nextRun === null ? 'NULL' : Number(nextRun)},${lastRun === null ? 'NULL' : Number(lastRun)},${lastDuration === null ? 'NULL' : Number(lastDuration)},${esc(lastDeliveryStatus)},${Number(consecutiveErrors)},${esc(payloadKind)},${esc(payloadMessage)},${esc(deliveryMode)},${esc(deliveryChannel)},${esc(deliveryTo)},${esc(rawJson)},${now})`;
+    return `(${esc(id)},${esc(name)},${enabled},${esc(target)},${esc(agent)},${esc(scheduleKind)},${esc(expr)},${esc(tz)},${esc(sessionTarget)},${esc(wakeMode)},${esc(agentId)},${esc(status)},${nextRun === null ? 'NULL' : Number(nextRun)},${lastRun === null ? 'NULL' : Number(lastRun)},${lastDuration === null ? 'NULL' : Number(lastDuration)},${esc(lastDeliveryStatus)},${Number(consecutiveErrors)},${esc(payloadKind)},${esc(payloadMessage)},${esc(deliveryMode)},${esc(deliveryChannel)},${esc(deliveryTo)},${esc(rawJson)},${now})`;
   }).join(',\n');
 
   const sql = `
