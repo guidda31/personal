@@ -23,7 +23,7 @@ function safe(v) {
 }
 
 async function queryRows(sql) {
-  const out = await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -N -B -e ${JSON.stringify(sql)}`);
+  const out = await run(`mariadb --default-character-set=utf8mb4 -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -N -B -e ${JSON.stringify(sql)}`);
   return out.trim() ? out.trim().split('\n').map((line) => line.split('\t')) : [];
 }
 

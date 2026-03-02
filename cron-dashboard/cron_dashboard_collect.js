@@ -22,7 +22,7 @@ async function runSql(sql) {
   const f = path.join(os.tmpdir(), `cron_dashboard_${Date.now()}_${Math.random().toString(36).slice(2)}.sql`);
   fs.writeFileSync(f, sql, 'utf8');
   try {
-    await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} < ${f}`);
+    await run(`mariadb --default-character-set=utf8mb4 -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} < ${f}`);
   } finally {
     try { fs.unlinkSync(f); } catch {}
   }
