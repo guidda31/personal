@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 const { exec } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const DB_USER = process.env.CRON_DB_USER || 'guidda';
 const DB_PASS = process.env.CRON_DB_PASS || '!q1w2e3r4t5';
@@ -12,6 +15,16 @@ function run(cmd) {
       resolve(stdout);
     });
   });
+}
+
+async function runSql(sql) {
+  const f = path.join(os.tmpdir(), `cron_dashboard_${Date.now()}.sql`);
+  fs.writeFileSync(f, sql, 'utf8');
+  try {
+    await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} < ${f}`);
+  } finally {
+    try { fs.unlinkSync(f); } catch {}
+  }
 }
 
 function esc(v) {
@@ -39,7 +52,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
   INDEX idx_updated (updated_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
-  await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -e ${esc(sql)}`);
+  await runSql(sql);
 }
 
 async function collect() {
@@ -88,7 +101,7 @@ ON DUPLICATE KEY UPDATE
   updated_at_ms=VALUES(updated_at_ms);
 `;
 
-  await run(`mariadb -u ${DB_USER} -p'${DB_PASS}' ${DB_NAME} -e ${esc(sql)}`);
+  await runSql(sql);
   console.log(`[collector] upserted ${jobs.length} jobs`);
 }
 
