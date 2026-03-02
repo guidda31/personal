@@ -5,9 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from .database import get_db
+from .database import get_db, SessionLocal
 
-app = FastAPI(title='Cron Dashboard API', version='2.1.0')
+app = FastAPI(title='Cron Dashboard API', version='2.2.0')
 security = HTTPBasic(auto_error=False)
 AUTH_USER = os.getenv('CRON_DASHBOARD_AUTH_USER', '')
 AUTH_PASS = os.getenv('CRON_DASHBOARD_AUTH_PASS', '')
@@ -21,24 +21,55 @@ app.add_middleware(
 )
 
 
+@app.on_event('startup')
+def startup_init():
+    db = SessionLocal()
+    try:
+        db.execute(text('''
+            CREATE TABLE IF NOT EXISTS news_items (
+              id BIGINT AUTO_INCREMENT PRIMARY KEY,
+              title VARCHAR(255) NOT NULL,
+              source VARCHAR(64) NULL,
+              category VARCHAR(64) NULL,
+              summary MEDIUMTEXT NULL,
+              url VARCHAR(1024) NULL,
+              published_at_ms BIGINT NULL,
+              created_at_ms BIGINT NOT NULL,
+              INDEX idx_news_published (published_at_ms DESC),
+              INDEX idx_news_category (category)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        '''))
+        db.commit()
+    finally:
+        db.close()
+
+
 def auth_guard(credentials: HTTPBasicCredentials | None = Depends(security)):
     if not AUTH_USER or not AUTH_PASS:
         return True
     if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='unauthorized',
-            headers={'WWW-Authenticate': 'Basic'},
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='unauthorized', headers={'WWW-Authenticate': 'Basic'})
     ok_user = secrets.compare_digest(credentials.username, AUTH_USER)
     ok_pass = secrets.compare_digest(credentials.password, AUTH_PASS)
     if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='unauthorized',
-            headers={'WWW-Authenticate': 'Basic'},
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='unauthorized', headers={'WWW-Authenticate': 'Basic'})
     return True
+
+
+@app.get('/api/news')
+def news_list(limit: int = 30, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+    lim = min(max(limit, 1), 200)
+    rows = db.execute(text('''
+        SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
+        FROM news_items
+        ORDER BY COALESCE(published_at_ms, created_at_ms) DESC
+        LIMIT :lim
+    '''), {'lim': lim}).mappings().all()
+    items = [{
+        'id': r['id'], 'title': r['title'], 'source': r['source'], 'category': r['category'],
+        'summary': r['summary'], 'url': r['url'], 'publishedAtMs': r['published_at_ms'], 'createdAtMs': r['created_at_ms']
+    } for r in rows]
+    return {'total': len(items), 'items': items}
 
 
 @app.get('/api/cron/jobs')
@@ -53,17 +84,11 @@ def cron_jobs(_: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     for r in rows:
         updated = max(updated, r['updated_at_ms'] or 0)
         jobs.append({
-            'id': r['id'],
-            'name': r['name'],
-            'enabled': bool(r['enabled']),
+            'id': r['id'], 'name': r['name'], 'enabled': bool(r['enabled']),
             'schedule': f"{r['schedule_expr'] or ''} @ {r['schedule_tz'] or ''}",
-            'status': r['status'] or 'idle',
-            'nextRunAtMs': r['next_run_at_ms'],
-            'lastRunAtMs': r['last_run_at_ms'],
-            'lastDurationMs': r['last_duration_ms'],
-            'target': r['session_target'] or '-',
-            'agent': r['agent_id'] or '-',
-            'updatedAtMs': r['updated_at_ms'],
+            'status': r['status'] or 'idle', 'nextRunAtMs': r['next_run_at_ms'],
+            'lastRunAtMs': r['last_run_at_ms'], 'lastDurationMs': r['last_duration_ms'],
+            'target': r['session_target'] or '-', 'agent': r['agent_id'] or '-', 'updatedAtMs': r['updated_at_ms'],
         })
     return {'total': len(jobs), 'jobs': jobs, 'updatedAt': updated}
 
@@ -80,12 +105,9 @@ def cron_summary(_: bool = Depends(auth_guard), db: Session = Depends(get_db)):
           (SELECT COUNT(*) FROM cron_job_runs WHERE run_at_ms >= (UNIX_TIMESTAMP()*1000 - 86400000)) AS runs_24h
     ''')).mappings().first()
     return {
-        'totalJobs': int(row['total_jobs'] or 0),
-        'enabledJobs': int(row['enabled_jobs'] or 0),
-        'okJobs': int(row['ok_jobs'] or 0),
-        'idleJobs': int(row['idle_jobs'] or 0),
-        'errorJobs': int(row['error_jobs'] or 0),
-        'runs24h': int(row['runs_24h'] or 0),
+        'totalJobs': int(row['total_jobs'] or 0), 'enabledJobs': int(row['enabled_jobs'] or 0),
+        'okJobs': int(row['ok_jobs'] or 0), 'idleJobs': int(row['idle_jobs'] or 0),
+        'errorJobs': int(row['error_jobs'] or 0), 'runs24h': int(row['runs_24h'] or 0),
     }
 
 

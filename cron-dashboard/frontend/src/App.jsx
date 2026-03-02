@@ -12,8 +12,10 @@ function makeAuthHeader(user, pass) {
 }
 
 export default function App() {
+  const [menu, setMenu] = useState('dashboard')
   const [summary, setSummary] = useState(null)
   const [jobs, setJobs] = useState([])
+  const [news, setNews] = useState([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [selectedId, setSelectedId] = useState('')
@@ -48,6 +50,16 @@ export default function App() {
     }
   }
 
+  const loadNews = async () => {
+    try {
+      setError('')
+      const n = await apiGet('/api/news?limit=50')
+      setNews(n.items || [])
+    } catch (e) {
+      setError('뉴스 조회 오류: ' + e.message)
+    }
+  }
+
   const loadDetail = async (id) => {
     if (!id) return
     try {
@@ -67,7 +79,7 @@ export default function App() {
   const saveAuth = () => {
     localStorage.setItem('cron_auth_user', authUser)
     localStorage.setItem('cron_auth_pass', authPass)
-    loadSummaryAndJobs()
+    menu === 'dashboard' ? loadSummaryAndJobs() : loadNews()
   }
 
   const clearAuth = () => {
@@ -102,16 +114,64 @@ export default function App() {
     return out
   }, [jobs])
 
+  const renderDashboard = () => (
+    <>
+      <h1 style={{ marginTop: 0, marginBottom: 6, letterSpacing: '-0.01em' }}>대시보드</h1>
+      <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>Cron 상태를 목록/상세로 확인하고 실행 이력을 추적합니다.</div>
+      <SummaryCards summary={summary} isMobile={isMobile} />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='이름/ID 검색' style={{ ...box, flex: 1, color: '#e5e7eb' }} />
+        <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...box, color: '#e5e7eb' }}>
+          <option value=''>전체 상태</option><option value='ok'>ok</option><option value='idle'>idle</option><option value='error'>error</option>
+        </select>
+        <button onClick={loadSummaryAndJobs} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>새로고침</button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, color: '#cbd5e1', fontSize: 12 }}>
+        <span style={{ ...box, padding: '4px 10px' }}>ALL {statusCount.all}</span>
+        <span style={{ ...box, padding: '4px 10px', color: '#22c55e' }}>OK {statusCount.ok}</span>
+        <span style={{ ...box, padding: '4px 10px', color: '#f59e0b' }}>IDLE {statusCount.idle}</span>
+        <span style={{ ...box, padding: '4px 10px', color: '#ef4444' }}>ERROR {statusCount.error}</span>
+        <span style={{ ...box, padding: '4px 10px' }}>FILTERED {filtered.length}</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(620px,1.1fr) minmax(420px,.9fr)', gap: 12 }}>
+        <div style={box}><JobsTable jobs={filtered} selectedId={selectedId} onSelect={setSelectedId} /></div>
+        <div style={box}><DetailPanel tab={tab} setTab={setTab} detail={detail} runs={runs} raw={raw} /></div>
+      </div>
+    </>
+  )
+
+  const renderNews = () => (
+    <>
+      <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
+      <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={loadNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>뉴스 새로고침</button>
+      </div>
+      <div style={box}>
+        {news.length === 0 ? <div style={{ color: '#94a3b8' }}>아직 적재된 뉴스가 없습니다.</div> : news.map((n) => (
+          <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
+            <div style={{ fontWeight: 700 }}>{n.title}</div>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
+            <div style={{ marginTop: 4, fontSize: 13 }}>{n.summary || '-'}</div>
+            {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+
   return (
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: '#0f172a', minHeight: '100vh', color: '#e5e7eb', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr' }}>
       {!isMobile && <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220', position:'sticky', top:0, height:'100vh' }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Dashboard</div>
-        <div style={{ ...box, background: '#0b2536', borderColor: '#1f4b63', color: '#7dd3fc' }}>대시보드</div>
+        <div onClick={() => setMenu('dashboard')} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='dashboard' ? '#0b2536':'#111827', borderColor: menu==='dashboard' ? '#1f4b63':'#334155', color: menu==='dashboard' ? '#7dd3fc':'#e5e7eb' }}>대시보드</div>
+        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb' }}>뉴스</div>
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
-        <h1 style={{ marginTop: 0, marginBottom: 6, letterSpacing: '-0.01em' }}>대시보드</h1>
-        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>Cron 상태를 목록/상세로 확인하고 실행 이력을 추적합니다.</div>
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
 
         <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto auto auto', gap: 8 }}>
@@ -119,36 +179,10 @@ export default function App() {
           <input value={authPass} onChange={(e) => setAuthPass(e.target.value)} placeholder='API 비밀번호' type='password' style={{ ...box, color: '#e5e7eb' }} />
           <button onClick={saveAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 저장/적용</button>
           <button onClick={clearAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 초기화</button>
-          <div style={{ ...box, padding: '8px 10px', color: authUser && authPass ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>
-            {authUser && authPass ? '인증 상태: 적용됨' : '인증 상태: 미설정'}
-          </div>
+          <div style={{ ...box, padding: '8px 10px', color: authUser && authPass ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>{authUser && authPass ? '인증 상태: 적용됨' : '인증 상태: 미설정'}</div>
         </div>
 
-        <SummaryCards summary={summary} isMobile={isMobile} />
-
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='이름/ID 검색' style={{ ...box, flex: 1, color: '#e5e7eb' }} />
-          <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...box, color: '#e5e7eb' }}>
-            <option value=''>전체 상태</option>
-            <option value='ok'>ok</option>
-            <option value='idle'>idle</option>
-            <option value='error'>error</option>
-          </select>
-          <button onClick={loadSummaryAndJobs} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>새로고침</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, color: '#cbd5e1', fontSize: 12 }}>
-          <span style={{ ...box, padding: '4px 10px' }}>ALL {statusCount.all}</span>
-          <span style={{ ...box, padding: '4px 10px', color: '#22c55e' }}>OK {statusCount.ok}</span>
-          <span style={{ ...box, padding: '4px 10px', color: '#f59e0b' }}>IDLE {statusCount.idle}</span>
-          <span style={{ ...box, padding: '4px 10px', color: '#ef4444' }}>ERROR {statusCount.error}</span>
-          <span style={{ ...box, padding: '4px 10px' }}>FILTERED {filtered.length}</span>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(620px,1.1fr) minmax(420px,.9fr)', gap: 12 }}>
-          <div style={box}><JobsTable jobs={filtered} selectedId={selectedId} onSelect={setSelectedId} /></div>
-          <div style={box}><DetailPanel tab={tab} setTab={setTab} detail={detail} runs={runs} raw={raw} /></div>
-        </div>
+        {menu === 'dashboard' ? renderDashboard() : renderNews()}
       </main>
     </div>
   )
