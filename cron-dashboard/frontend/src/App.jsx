@@ -16,6 +16,7 @@ export default function App() {
   const [summary, setSummary] = useState(null)
   const [jobs, setJobs] = useState([])
   const [news, setNews] = useState([])
+  const [stockNews, setStockNews] = useState([])
   const [newsCategories, setNewsCategories] = useState([])
   const [newsQ, setNewsQ] = useState(localStorage.getItem('news_q') || '')
   const [newsCategory, setNewsCategory] = useState(localStorage.getItem('news_category') || '')
@@ -76,9 +77,19 @@ export default function App() {
     }
   }
 
+  const loadStockNews = async () => {
+    try {
+      setError('')
+      const s = await apiGet(`/api/news/stocks?limit=50&days=${newsDays}`)
+      setStockNews(s.items || [])
+    } catch (e) {
+      setError('주식 뉴스 조회 오류: ' + e.message)
+    }
+  }
+
   const loadNewsDetail = async (id) => {
     try {
-      const d = await apiGet(`/api/news/${id}`)
+      const d = await apiGet(`/api/news/item/${id}`)
       setNewsDetail(d)
     } catch (e) {
       setError('뉴스 상세 조회 오류: ' + e.message)
@@ -137,6 +148,7 @@ export default function App() {
   useEffect(() => {
     if (menu === 'dashboard') loadSummaryAndJobs()
     if (menu === 'news') loadNews()
+    if (menu === 'stocks') loadStockNews()
   }, [menu])
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 1100)
@@ -160,6 +172,7 @@ export default function App() {
     const timer = setInterval(() => {
       if (menu === 'dashboard') loadSummaryAndJobs()
       if (menu === 'news') loadNews()
+      if (menu === 'stocks') loadStockNews()
     }, 300000)
     return () => clearInterval(timer)
   }, [menu, newsQ, newsCategory, newsSource, newsDays])
@@ -206,6 +219,29 @@ export default function App() {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(620px,1.1fr) minmax(420px,.9fr)', gap: 12 }}>
         <div style={box}><JobsTable jobs={filtered} selectedId={selectedId} onSelect={setSelectedId} /></div>
         <div style={box}><DetailPanel tab={tab} setTab={setTab} detail={detail} runs={runs} raw={raw} /></div>
+      </div>
+    </>
+  )
+
+  const renderStocks = () => (
+    <>
+      <h1 style={{ marginTop: 0, marginBottom: 6 }}>주식</h1>
+      <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>뉴스 중 주식/증시 관련 항목만 분리한 메뉴입니다.</div>
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={loadStockNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>주식 뉴스 새로고침</button>
+      </div>
+      <div style={box}>
+        {stockNews.length === 0 ? <div style={{ color: '#94a3b8' }}>주식 관련 뉴스가 없습니다.</div> : stockNews.map((n) => (
+          <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
+            <div style={{ fontWeight: 700 }}>{n.title}</div>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
+            <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n.summary || '-').slice(0, 320)}{(n.summary||'').length>320?' ...':''}</div>
+            <div style={{ marginTop: 6, display: 'flex', gap: 10 }}>
+              <button onClick={() => loadNewsDetail(n.id)} style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#7dd3fc', fontSize: 12 }}>상세 보기</button>
+              {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
+            </div>
+          </div>
+        ))}
       </div>
     </>
   )
@@ -309,7 +345,8 @@ export default function App() {
       {!isMobile && <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220', position:'sticky', top:0, height:'100vh' }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Dashboard</div>
         <div onClick={() => setMenu('dashboard')} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='dashboard' ? '#0b2536':'#111827', borderColor: menu==='dashboard' ? '#1f4b63':'#334155', color: menu==='dashboard' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>대시보드</span><span style={{fontSize:12, color:'#94a3b8'}}>{jobs.length}</span></div>
-        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>뉴스</span><span style={{fontSize:12, color:'#94a3b8'}}>{news.length}</span></div>
+        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>뉴스</span><span style={{fontSize:12, color:'#94a3b8'}}>{news.length}</span></div>
+        <div onClick={() => { setMenu('stocks'); loadStockNews() }} style={{ ...box, cursor:'pointer', background: menu==='stocks' ? '#0b2536':'#111827', borderColor: menu==='stocks' ? '#1f4b63':'#334155', color: menu==='stocks' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>주식</span><span style={{fontSize:12, color:'#94a3b8'}}>{stockNews.length}</span></div>
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
@@ -329,6 +366,7 @@ export default function App() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <button onClick={() => setMenu('dashboard')} style={{ ...box, cursor: 'pointer', color: menu==='dashboard' ? '#7dd3fc' : '#e5e7eb', background: menu==='dashboard' ? '#0b2536' : '#111827' }}>대시보드</button>
             <button onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor: 'pointer', color: menu==='news' ? '#7dd3fc' : '#e5e7eb', background: menu==='news' ? '#0b2536' : '#111827' }}>뉴스</button>
+            <button onClick={() => { setMenu('stocks'); loadStockNews() }} style={{ ...box, cursor: 'pointer', color: menu==='stocks' ? '#7dd3fc' : '#e5e7eb', background: menu==='stocks' ? '#0b2536' : '#111827' }}>주식</button>
           </div>
         )}
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
@@ -341,7 +379,7 @@ export default function App() {
           <div style={{ ...box, padding: '8px 10px', color: authUser && authPass ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>{authUser && authPass ? '인증 상태: 적용됨' : '인증 상태: 미설정'}</div>
         </div>
 
-        {menu === 'dashboard' ? renderDashboard() : renderNews()}
+        {menu === 'dashboard' ? renderDashboard() : menu === 'news' ? renderNews() : renderStocks()}
       </main>
     </div>
   )

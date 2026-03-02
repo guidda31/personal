@@ -67,7 +67,7 @@ def news_categories(_: bool = Depends(auth_guard), db: Session = Depends(get_db)
     return {'items': [{'category': r['category'], 'count': int(r['cnt'])} for r in rows]}
 
 
-@app.get('/api/news/{news_id}')
+@app.get('/api/news/item/{news_id}')
 def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
     row = db.execute(text('''
         SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
@@ -79,6 +79,32 @@ def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depen
         'id': row['id'], 'title': row['title'], 'source': row['source'], 'category': row['category'],
         'summary': row['summary'], 'url': row['url'], 'publishedAtMs': row['published_at_ms'], 'createdAtMs': row['created_at_ms']
     }
+
+
+@app.get('/api/news/stocks')
+def news_stocks(limit: int = 50, days: int = 30, _: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+    lim = min(max(limit, 1), 200)
+    days = min(max(days, 1), 365)
+    min_ts = int(__import__('time').time() * 1000) - (days * 86400000)
+
+    rows = db.execute(text('''
+        SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
+        FROM news_items
+        WHERE COALESCE(published_at_ms, created_at_ms) >= :min_ts
+          AND (
+            title LIKE '%증시%' OR title LIKE '%주식%' OR title LIKE '%KRX%' OR title LIKE '%코스피%' OR title LIKE '%코스닥%'
+            OR summary LIKE '%증시%' OR summary LIKE '%주식%' OR summary LIKE '%목표가%' OR summary LIKE '%손절%'
+            OR source LIKE '%krx%' OR source LIKE '%invest-monitor%'
+          )
+        ORDER BY COALESCE(published_at_ms, created_at_ms) DESC
+        LIMIT :lim
+    '''), {'min_ts': min_ts, 'lim': lim}).mappings().all()
+
+    items = [{
+        'id': r['id'], 'title': r['title'], 'source': r['source'], 'category': r['category'],
+        'summary': r['summary'], 'url': r['url'], 'publishedAtMs': r['published_at_ms'], 'createdAtMs': r['created_at_ms']
+    } for r in rows]
+    return {'total': len(items), 'items': items}
 
 
 @app.get('/api/news')
