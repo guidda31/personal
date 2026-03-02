@@ -110,7 +110,8 @@ export default function App() {
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
-        <h1 style={{ marginTop: 0 }}>대시보드</h1>
+        <h1 style={{ marginTop: 0, marginBottom: 6, letterSpacing: '-0.01em' }}>대시보드</h1>
+        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>Cron 상태를 목록/상세로 확인하고 실행 이력을 추적합니다.</div>
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
 
         <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto auto auto', gap: 8 }}>
