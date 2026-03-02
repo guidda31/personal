@@ -14,15 +14,32 @@ is_listening() {
 }
 
 if is_listening 8000; then
-  echo "[backend] already listening on :8000"
+  # health probe first (avoid stale listener confusion)
+  if curl -fsS --max-time 2 http://127.0.0.1:8000/api/cron/summary >/dev/null 2>&1; then
+    echo "[backend] already healthy on :8000"
+  else
+    echo "[backend] unhealthy listener detected, restarting"
+    pkill -f "uvicorn app.main:app --host 0.0.0.0 --port 8000" || true
+    sleep 1
+    (
+      cd "$BASE/backend"
+      nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$TMP_DIR/cron_dashboard_backend.log" 2>&1 &
+      echo $! > "$TMP_DIR/cron_dashboard_backend.pid"
+    )
+  fi
 else
   (
     cd "$BASE/backend"
     nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$TMP_DIR/cron_dashboard_backend.log" 2>&1 &
     echo $! > "$TMP_DIR/cron_dashboard_backend.pid"
   )
-  sleep 1
-  is_listening 8000 && echo "[backend] started" || echo "[backend] failed to start"
+fi
+sleep 1
+code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:8000/api/cron/summary || true)
+if is_listening 8000 && { [[ "$code" == "200" ]] || [[ "$code" == "401" ]]; }; then
+  echo "[backend] started/healthy (http $code)"
+else
+  echo "[backend] failed to start (check $TMP_DIR/cron_dashboard_backend.log)"
 fi
 
 if is_listening 5173; then
