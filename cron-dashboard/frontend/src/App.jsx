@@ -201,6 +201,32 @@ export default function App() {
     return out
   }, [jobs])
 
+  const extractTopicTags = (items) => {
+    const dict = [
+      { tag: '중동 리스크', pats: ['중동', '이란', '이스라엘', '유가', '원유'] },
+      { tag: '환율/달러', pats: ['환율', '달러', 'usd', '원달러'] },
+      { tag: '반도체', pats: ['반도체', '삼성전자', 'sk하이닉스'] },
+      { tag: 'KRX/증시', pats: ['증시', '코스피', '코스닥', 'krx'] },
+      { tag: '종목 전략', pats: ['종목', '목표가', '손절', '매수', '수급'] },
+      { tag: '정책/정부', pats: ['정부', '정책', '당국', '회의', '점검'] },
+      { tag: '금융/지원', pats: ['금융', '은행', '지원', '대출', '만기연장'] },
+      { tag: '부동산/가계', pats: ['부동산', '가계', '농지', '주택'] },
+      { tag: '수출/무역', pats: ['수출', '무역', '관세'] },
+    ]
+    const text = (items || []).map((n) => `${n.title || ''}\n${n.summary || ''}`).join('\n').toLowerCase()
+    const out = []
+    dict.forEach((d) => {
+      let score = 0
+      d.pats.forEach((p) => {
+        const re = new RegExp(p.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+        const m = text.match(re)
+        score += m ? m.length : 0
+      })
+      if (score > 0) out.push([d.tag, score])
+    })
+    return out.sort((a, b) => b[1] - a[1]).slice(0, 8)
+  }
+
   const renderDashboard = () => (
     <>
       <h1 style={{ marginTop: 0, marginBottom: 6, letterSpacing: '-0.01em' }}>대시보드</h1>
@@ -230,28 +256,42 @@ export default function App() {
     </>
   )
 
-  const renderIssues = () => (
-    <>
-      <h1 style={{ marginTop: 0, marginBottom: 6 }}>이슈</h1>
-      <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>뉴스 중 증시를 제외한 정보성 이슈 항목 메뉴입니다.</div>
-      <div style={{ marginBottom: 12 }}>
-        <button onClick={loadIssueNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>이슈 새로고침</button>
-      </div>
-      <div style={box}>
-        {issueNews.length === 0 ? <div style={{ color: '#94a3b8' }}>이슈 뉴스가 없습니다.</div> : issueNews.map((n) => (
-          <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
-            <div style={{ fontWeight: 700 }}>{n.title}</div>
-            <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
-            <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n.summary || '-').slice(0, 320)}{(n.summary||'').length>320?' ...':''}</div>
-            <div style={{ marginTop: 6, display: 'flex', gap: 10 }}>
-              <button onClick={() => loadNewsDetail(n.id)} style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#7dd3fc', fontSize: 12 }}>상세 보기</button>
-              {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
-            </div>
+  const renderIssues = () => {
+    const topKeywords = extractTopicTags(issueNews)
+
+    return (
+      <>
+        <h1 style={{ marginTop: 0, marginBottom: 6 }}>이슈</h1>
+        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>뉴스 중 증시를 제외한 정보성 이슈 항목 메뉴입니다.</div>
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={loadIssueNews} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>이슈 새로고침</button>
+        </div>
+
+        <div style={{ ...box, marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>핵심 주제</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {topKeywords.length === 0 ? <span style={{ color: '#94a3b8' }}>키워드 없음</span> : topKeywords.map(([k, c]) => (
+              <span key={k} style={{ ...box, padding: '4px 8px', fontSize: 12, color: '#cbd5e1' }}>{k} {c}</span>
+            ))}
           </div>
-        ))}
-      </div>
-    </>
-  )
+        </div>
+
+        <div style={box}>
+          {issueNews.length === 0 ? <div style={{ color: '#94a3b8' }}>이슈 뉴스가 없습니다.</div> : issueNews.map((n) => (
+            <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
+              <div style={{ fontWeight: 700 }}>{n.title}</div>
+              <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
+              <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n.summary || '-').slice(0, 320)}{(n.summary||'').length>320?' ...':''}</div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 10 }}>
+                <button onClick={() => loadNewsDetail(n.id)} style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#7dd3fc', fontSize: 12 }}>상세 보기</button>
+                {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    )
+  }
 
   const renderNews = () => {
     const sorted = [...news].sort((a, b) => {
@@ -269,11 +309,12 @@ export default function App() {
     const uniqueSources = Object.keys(sourceCount).length
     const latestTs = sorted[0]?.publishedAtMs || sorted[0]?.createdAtMs || null
     const oldestTs = sorted[sorted.length - 1]?.publishedAtMs || sorted[sorted.length - 1]?.createdAtMs || null
+    const topKeywords = extractTopicTags(sorted)
 
     return (
       <>
         <h1 style={{ marginTop: 0, marginBottom: 6 }}>뉴스</h1>
-        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>정보성 뉴스/브리핑 기록을 확인합니다.</div>
+        <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 10 }}>증시/주식 중심 뉴스 기록을 확인합니다.</div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 180px 140px 120px auto auto auto', gap: 8, marginBottom: 12 }}>
           <input value={newsQ} onChange={(e) => setNewsQ(e.target.value)} placeholder='뉴스 검색어' style={{ ...box, color: '#e5e7eb' }} />
           <input value={newsCategory} onChange={(e) => setNewsCategory(e.target.value)} placeholder='카테고리(예: cron-news)' style={{ ...box, color: '#e5e7eb' }} />
@@ -296,6 +337,15 @@ export default function App() {
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>소스 {uniqueSources}개</span>
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최신 {latestTs ? new Date(latestTs).toLocaleDateString('ko-KR') : '-'}</span>
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최초 {oldestTs ? new Date(oldestTs).toLocaleDateString('ko-KR') : '-'}</span>
+        </div>
+
+        <div style={{ ...box, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>핵심 주제</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {topKeywords.length === 0 ? <span style={{ color: '#94a3b8' }}>주제 없음</span> : topKeywords.map(([k, c]) => (
+              <span key={k} style={{ ...box, padding: '4px 8px', fontSize: 12, color: '#cbd5e1' }}>{k} {c}</span>
+            ))}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
