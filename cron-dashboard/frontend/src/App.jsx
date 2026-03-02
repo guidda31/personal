@@ -296,8 +296,8 @@ export default function App() {
     <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: '#0f172a', minHeight: '100vh', color: '#e5e7eb', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr' }}>
       {!isMobile && <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220', position:'sticky', top:0, height:'100vh' }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Dashboard</div>
-        <div onClick={() => setMenu('dashboard')} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='dashboard' ? '#0b2536':'#111827', borderColor: menu==='dashboard' ? '#1f4b63':'#334155', color: menu==='dashboard' ? '#7dd3fc':'#e5e7eb' }}>대시보드</div>
-        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb' }}>뉴스</div>
+        <div onClick={() => setMenu('dashboard')} style={{ ...box, marginBottom:8, cursor:'pointer', background: menu==='dashboard' ? '#0b2536':'#111827', borderColor: menu==='dashboard' ? '#1f4b63':'#334155', color: menu==='dashboard' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>대시보드</span><span style={{fontSize:12, color:'#94a3b8'}}>{jobs.length}</span></div>
+        <div onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor:'pointer', background: menu==='news' ? '#0b2536':'#111827', borderColor: menu==='news' ? '#1f4b63':'#334155', color: menu==='news' ? '#7dd3fc':'#e5e7eb', display:'flex', justifyContent:'space-between' }}><span>뉴스</span><span style={{fontSize:12, color:'#94a3b8'}}>{news.length}</span></div>
       </aside>}
 
       <main style={{ padding: 20, maxWidth: 1600 }}>
