@@ -22,6 +22,7 @@ export default function App() {
   const [raw, setRaw] = useState('')
   const [tab, setTab] = useState('info')
   const [error, setError] = useState('')
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1100)
 
   const [authUser, setAuthUser] = useState(localStorage.getItem('cron_auth_user') || '')
   const [authPass, setAuthPass] = useState(localStorage.getItem('cron_auth_pass') || '')
@@ -78,6 +79,11 @@ export default function App() {
 
   useEffect(() => { loadSummaryAndJobs() }, [])
   useEffect(() => { if (selectedId) loadDetail(selectedId) }, [selectedId])
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 1100)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const filtered = useMemo(() => jobs.filter((j) => {
     const hit = !q || j.name.toLowerCase().includes(q.toLowerCase()) || j.id.toLowerCase().includes(q.toLowerCase())
@@ -85,27 +91,41 @@ export default function App() {
     return hit && st
   }), [jobs, q, status])
 
+  const statusCount = useMemo(() => {
+    const out = { all: jobs.length, ok: 0, idle: 0, error: 0 }
+    jobs.forEach((j) => {
+      const s = String(j.status || '').toLowerCase()
+      if (s === 'ok') out.ok += 1
+      else if (s === 'idle') out.idle += 1
+      else if (s === 'error') out.error += 1
+    })
+    return out
+  }, [jobs])
+
   return (
-    <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: '#0f172a', minHeight: '100vh', color: '#e5e7eb', display: 'grid', gridTemplateColumns: '220px 1fr' }}>
-      <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220' }}>
+    <div style={{ fontFamily: 'Inter,system-ui,sans-serif', background: '#0f172a', minHeight: '100vh', color: '#e5e7eb', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr' }}>
+      {!isMobile && <aside style={{ borderRight: '1px solid #1f2937', padding: 16, background: '#0b1220', position:'sticky', top:0, height:'100vh' }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Dashboard</div>
         <div style={{ ...box, background: '#0b2536', borderColor: '#1f4b63', color: '#7dd3fc' }}>대시보드</div>
-      </aside>
+      </aside>}
 
-      <main style={{ padding: 20 }}>
+      <main style={{ padding: 20, maxWidth: 1600 }}>
         <h1 style={{ marginTop: 0 }}>대시보드</h1>
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
 
-        <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 8 }}>
+        <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto auto auto', gap: 8 }}>
           <input value={authUser} onChange={(e) => setAuthUser(e.target.value)} placeholder='API 계정' style={{ ...box, color: '#e5e7eb' }} />
           <input value={authPass} onChange={(e) => setAuthPass(e.target.value)} placeholder='API 비밀번호' type='password' style={{ ...box, color: '#e5e7eb' }} />
           <button onClick={saveAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 저장/적용</button>
           <button onClick={clearAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 초기화</button>
+          <div style={{ ...box, padding: '8px 10px', color: authUser && authPass ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>
+            {authUser && authPass ? '인증 상태: 적용됨' : '인증 상태: 미설정'}
+          </div>
         </div>
 
-        <SummaryCards summary={summary} />
+        <SummaryCards summary={summary} isMobile={isMobile} />
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder='이름/ID 검색' style={{ ...box, flex: 1, color: '#e5e7eb' }} />
           <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...box, color: '#e5e7eb' }}>
             <option value=''>전체 상태</option>
@@ -116,7 +136,15 @@ export default function App() {
           <button onClick={loadSummaryAndJobs} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>새로고침</button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr .9fr', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, color: '#cbd5e1', fontSize: 12 }}>
+          <span style={{ ...box, padding: '4px 10px' }}>ALL {statusCount.all}</span>
+          <span style={{ ...box, padding: '4px 10px', color: '#22c55e' }}>OK {statusCount.ok}</span>
+          <span style={{ ...box, padding: '4px 10px', color: '#f59e0b' }}>IDLE {statusCount.idle}</span>
+          <span style={{ ...box, padding: '4px 10px', color: '#ef4444' }}>ERROR {statusCount.error}</span>
+          <span style={{ ...box, padding: '4px 10px' }}>FILTERED {filtered.length}</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(620px,1.1fr) minmax(420px,.9fr)', gap: 12 }}>
           <div style={box}><JobsTable jobs={filtered} selectedId={selectedId} onSelect={setSelectedId} /></div>
           <div style={box}><DetailPanel tab={tab} setTab={setTab} detail={detail} runs={runs} raw={raw} /></div>
         </div>
