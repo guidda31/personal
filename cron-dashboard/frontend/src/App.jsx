@@ -16,6 +16,7 @@ export default function App() {
   const [summary, setSummary] = useState(null)
   const [jobs, setJobs] = useState([])
   const [news, setNews] = useState([])
+  const [newsCategories, setNewsCategories] = useState([])
   const [newsQ, setNewsQ] = useState('')
   const [newsCategory, setNewsCategory] = useState('')
   const [newsSource, setNewsSource] = useState('')
@@ -63,8 +64,12 @@ export default function App() {
       if (newsCategory) qs.set('category', newsCategory)
       const qMerged = [newsQ, newsSource].filter(Boolean).join(' ')
       if (qMerged) qs.set('q', qMerged)
-      const n = await apiGet(`/api/news?${qs.toString()}`)
+      const [n, c] = await Promise.all([
+        apiGet(`/api/news?${qs.toString()}`),
+        apiGet('/api/news/categories')
+      ])
       setNews(n.items || [])
+      setNewsCategories(c.items || [])
     } catch (e) {
       setError('뉴스 조회 오류: ' + e.message)
     }
@@ -195,6 +200,14 @@ export default function App() {
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>소스 {uniqueSources}개</span>
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최신 {latestTs ? new Date(latestTs).toLocaleDateString('ko-KR') : '-'}</span>
           <span style={{ ...box, padding: '4px 8px', fontSize: 12 }}>최초 {oldestTs ? new Date(oldestTs).toLocaleDateString('ko-KR') : '-'}</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          {newsCategories.slice(0, 8).map((c) => (
+            <button key={c.category} onClick={() => setNewsCategory(c.category)} style={{ ...box, padding: '4px 8px', fontSize: 12, color: newsCategory===c.category ? '#7dd3fc' : '#cbd5e1', cursor: 'pointer' }}>
+              {c.category} {c.count}
+            </button>
+          ))}
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>

@@ -56,6 +56,17 @@ def auth_guard(credentials: HTTPBasicCredentials | None = Depends(security)):
     return True
 
 
+@app.get('/api/news/categories')
+def news_categories(_: bool = Depends(auth_guard), db: Session = Depends(get_db)):
+    rows = db.execute(text('''
+        SELECT COALESCE(category,'unknown') as category, COUNT(*) as cnt
+        FROM news_items
+        GROUP BY COALESCE(category,'unknown')
+        ORDER BY cnt DESC
+    ''')).mappings().all()
+    return {'items': [{'category': r['category'], 'count': int(r['cnt'])} for r in rows]}
+
+
 @app.get('/api/news')
 def news_list(
     limit: int = 30,
