@@ -83,11 +83,23 @@ def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depen
 
 MARKET_COND = """
 (
-  title LIKE '%증시%' OR title LIKE '%주식%' OR title LIKE '%KRX%' OR title LIKE '%코스피%' OR title LIKE '%코스닥%'
+  source LIKE '%krx%' OR source LIKE '%invest-monitor%' OR source LIKE '%surge-watch%'
+  OR title LIKE '%증시%' OR title LIKE '%주식%' OR title LIKE '%KRX%' OR title LIKE '%코스피%' OR title LIKE '%코스닥%'
   OR title LIKE '%종목%' OR title LIKE '%목표가%' OR title LIKE '%손절%' OR title LIKE '%수급%'
   OR summary LIKE '%증시%' OR summary LIKE '%주식%' OR summary LIKE '%목표가%' OR summary LIKE '%손절%'
   OR summary LIKE '%코스피%' OR summary LIKE '%코스닥%' OR summary LIKE '%종목%' OR summary LIKE '%매수%'
-  OR source LIKE '%krx%' OR source LIKE '%invest-monitor%' OR source LIKE '%surge-watch%'
+)
+"""
+
+ISSUE_FORCE_COND = """
+(
+  source LIKE '%daily-news-summary%'
+  AND title NOT LIKE '%증시%'
+  AND title NOT LIKE '%주식%'
+  AND title NOT LIKE '%KRX%'
+  AND title NOT LIKE '%코스피%'
+  AND title NOT LIKE '%코스닥%'
+  AND title NOT LIKE '%종목%'
 )
 """
 
@@ -124,7 +136,10 @@ def news_others(limit: int = 50, days: int = 30, _: bool = Depends(auth_guard), 
         SELECT id,title,source,category,summary,url,published_at_ms,created_at_ms
         FROM news_items
         WHERE COALESCE(published_at_ms, created_at_ms) >= :min_ts
-          AND NOT {MARKET_COND}
+          AND (
+            NOT {MARKET_COND}
+            OR {ISSUE_FORCE_COND}
+          )
         ORDER BY COALESCE(published_at_ms, created_at_ms) DESC
         LIMIT :lim
     '''), {'min_ts': min_ts, 'lim': lim}).mappings().all()
