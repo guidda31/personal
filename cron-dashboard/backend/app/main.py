@@ -84,8 +84,10 @@ def news_detail(news_id: int, _: bool = Depends(auth_guard), db: Session = Depen
 MARKET_COND = """
 (
   title LIKE '%증시%' OR title LIKE '%주식%' OR title LIKE '%KRX%' OR title LIKE '%코스피%' OR title LIKE '%코스닥%'
+  OR title LIKE '%종목%' OR title LIKE '%목표가%' OR title LIKE '%손절%' OR title LIKE '%수급%'
   OR summary LIKE '%증시%' OR summary LIKE '%주식%' OR summary LIKE '%목표가%' OR summary LIKE '%손절%'
-  OR source LIKE '%krx%' OR source LIKE '%invest-monitor%'
+  OR summary LIKE '%코스피%' OR summary LIKE '%코스닥%' OR summary LIKE '%종목%' OR summary LIKE '%매수%'
+  OR source LIKE '%krx%' OR source LIKE '%invest-monitor%' OR source LIKE '%surge-watch%'
 )
 """
 
