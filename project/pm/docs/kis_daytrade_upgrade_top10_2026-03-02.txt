@@ -1,0 +1,179 @@
+# KIS Daytrade 고도화 우선순위 TOP10 (논문 5편 반영)
+
+기준 논문:
+1. Optimal Order Execution in Intraday Markets (2009.07892)
+2. The microstructure of high frequency markets (1709.02015)
+3. Detecting intraday market states using temporal clustering (1508.04900)
+4. Ensemble properties of high frequency data and intraday trading rules (1202.2447)
+5. Market Microstructure During Financial Crisis (1606.03590)
+
+---
+
+## A. 즉시 구현 가능 (현재 데이터/코드로 가능)
+
+### 1) 단일 주문 → 분할 진입(TWAP-lite)
+- 목적: 체결 충격/슬리피지 완화
+- 현재: 현금 100%를 1회 시장가성 지정가
+- 변경: 3~5회 분할(예: 40%/35%/25%)로 30~90초 간격 진입
+- 반영 위치: `kis-openapi/runner.py` 진입 블록
+
+### 2) 동적 포지션 사이즈(변동성 기반)
+- 목적: 고변동 종목 과노출 방지
+- 변경: `position_fraction = f(최근 변동성)`
+  - 고변동: 0.35
+  - 중변동: 0.6
+  - 저변동: 1.0
+- 반영 위치: `calc_qty()` 호출 전 현금 배수 적용
+
+### 3) 진입 금지 필터(과열 + 거래량 부족)
+- 목적: 급등 말미 추격 방지
+- 조건 예시: `RSI>80 AND vol_ratio<1.2`면 진입 스킵
+- 반영 위치: 후보 점수 계산 직후
+
+### 4) 일일 손실 한도(Daily Stop)
+- 목적: 연속 손실 시 당일 거래 중단
+- 변경: 실현손익 누적이 -X%/-Y원 도달 시 `state.trading_disabled_today=true`
+- 반영 위치: 손절/청산 후 상태 업데이트
+
+### 5) 시간대 필터 강화
+- 목적: 잡음구간 회피
+- 변경: 09:01~09:10, 14:50~15:19 구간 별도 룰
+  - 시초 10분: 보수 진입
+  - 종가 근접: 신규 진입 금지
+- 반영 위치: `is_continuous_session()` + 진입 조건
+
+### 6) 주문 실패 재시도 정책
+- 목적: 주문 오류 내구성
+- 변경: 일시 오류 시 1~2회 재시도(백오프), 치명 오류는 즉시 중단
+- 반영 위치: `order_cash_buy/sell` 호출 래퍼 함수
+
+---
+
+## B. 추가 데이터 필요 (단계2)
+
+### 7) 호가 스프레드/체결강도 기반 진입 품질 필터
+- 필요 데이터: 베스트호가, 체결강도, 호가잔량
+- 목적: 체결 불리 구간 회피
+- 구현: `spread_bps`, `imbalance` 임계치
+
+### 8) 장중 상태 분류(추세/혼조/급변) + 전략 스위칭
+- 필요 데이터: 1분~5분 봉 시계열
+- 목적: 상태별 진입/청산 파라미터 변경
+- 구현: k-means/HMM 단순화 버전부터
+
+### 9) 슬리피지/수수료 모델 내재화 백테스트
+- 필요 데이터: 체결기록 + 분봉
+- 목적: 실전 기대수익 과대추정 방지
+- 구현: 보수적 비용모델(틱+수수료+세금)
+
+### 10) 포트폴리오형 멀티엔트리(상관/노출 제어)
+- 필요 데이터: 종목 간 상관, 섹터 노출
+- 목적: 단일종목 편중 리스크 완화
+- 구현: 상위 N개 중 상관 낮은 2~3개 선택
+
+---
+
+## 실제 코드 변경안 (1차 적용안)
+
+## 1) config 추가 (`kis-openapi/.env` 또는 설정)
+```env
+DT_POSITION_FRACTION_LOW=1.0
+DT_POSITION_FRACTION_MID=0.6
+DT_POSITION_FRACTION_HIGH=0.35
+DT_DAILY_MAX_LOSS_PCT=2.5
+DT_ENTRY_SPLITS=40,35,25
+DT_ENTRY_SPLIT_INTERVAL_SEC=45
+DT_DISABLE_NEW_ENTRY_AFTER=14:50
+```
+
+## 2) state 스키마 확장 (`.daytrade_state.json`)
+```json
+{
+  "date": "2026-03-03",
+  "entered": false,
+  "symbol": "",
+  "qty": 0,
+  "avg_price": 0,
+  "realized_pnl_pct": 0.0,
+  "trading_disabled_today": false,
+  "entry_legs_done": 0
+}
+```
+
+## 3) runner.py 핵심 함수 추가(안)
+```python
+def volatility_regime_from_quote(o: dict) -> str:
+    # 임시: 전일대비 등락률 절대값 + 거래량비로 근사
+    rate = abs(float(o.get("prdy_ctrt", "0") or 0))
+    vr = abs(float(o.get("prdy_vrss_vol_rate", "0") or 0))
+    score = rate + (vr / 50.0)
+    if score >= 8:
+        return "high"
+    if score >= 4:
+        return "mid"
+    return "low"
+
+
+def position_fraction(regime: str) -> float:
+    return {"low":1.0, "mid":0.6, "high":0.35}.get(regime, 0.6)
+
+
+def parse_splits(s: str = "40,35,25") -> list[float]:
+    arr = [max(0, float(x.strip())) for x in s.split(",") if x.strip()]
+    tot = sum(arr) or 100.0
+    return [x/tot for x in arr]
+
+
+def daily_loss_guard(state: dict, max_loss_pct: float = 2.5) -> bool:
+    return float(state.get("realized_pnl_pct", 0.0)) <= -abs(max_loss_pct)
+```
+
+## 4) 진입 블록 교체(안)
+```python
+# before entry
+if state.get("trading_disabled_today"):
+    log_event("entry_skip", {"reason": "daily_loss_guard"}, notify=True)
+    return
+
+regime = volatility_regime_from_quote(q)
+frac = position_fraction(regime)
+usable_cash = int(cash * frac)
+base_qty = calc_qty(usable_cash, price)
+
+splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
+for i, w in enumerate(splits):
+    leg_qty = max(0, int(base_qty * w))
+    if leg_qty <= 0:
+        continue
+    # 주문 + 실패 재시도 래퍼
+    submit_buy_with_retry(symbol, leg_qty, price)
+    state["entry_legs_done"] = i + 1
+    save_state(state)
+    time.sleep(int(os.getenv("DT_ENTRY_SPLIT_INTERVAL_SEC", "45")))
+```
+
+## 5) 손실 누적/중단 로직(안)
+```python
+# when position closed
+trade_pnl_pct = ((exit_price - avg_price) / avg_price) * 100
+state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+if state["realized_pnl_pct"] <= -float(os.getenv("DT_DAILY_MAX_LOSS_PCT", "2.5")):
+    state["trading_disabled_today"] = True
+    log_event("daily_stop_triggered", {"realized_pnl_pct": state["realized_pnl_pct"]}, notify=True)
+save_state(state)
+```
+
+---
+
+## PM 실행 우선순위 (내일 장 전 적용 권장)
+1. 분할 진입 + 동적 사이징 + 일일손실한도 (즉시)
+2. 주문 재시도/오류 분류 + 시간대 필터 강화 (즉시)
+3. 호가/체결강도 데이터 연동(TR 확장) 후 미세구조 필터 (단계2)
+4. 상태분류(추세/혼조) + 전략 스위칭 (단계2)
+
+---
+
+## 리스크 메모
+- “최대 수익”보다 “손실 분산/생존”이 장기 수익률을 개선함.
+- 현재 러너는 단순 모멘텀 기반이라, 단계2(호가/미시구조) 미적용 시 과열장 추격 리스크가 큼.
+- 실계좌 적용 전 최소 5거래일 dry-run + 소액 실거래 로그 검증 필요.
