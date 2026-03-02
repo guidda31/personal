@@ -4,16 +4,11 @@ import JobsTable from './components/JobsTable'
 import DetailPanel from './components/DetailPanel'
 
 const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
-const AUTH_USER = import.meta.env.VITE_AUTH_USER || ''
-const AUTH_PASS = import.meta.env.VITE_AUTH_PASS || ''
 const box = { border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#111827' }
 
-async function apiGet(path) {
-  const headers = {}
-  if (AUTH_USER && AUTH_PASS) headers.Authorization = 'Basic ' + btoa(`${AUTH_USER}:${AUTH_PASS}`)
-  const res = await fetch(`${API}${path}`, { headers })
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+function makeAuthHeader(user, pass) {
+  if (!user || !pass) return null
+  return 'Basic ' + btoa(`${user}:${pass}`)
 }
 
 export default function App() {
@@ -27,6 +22,18 @@ export default function App() {
   const [raw, setRaw] = useState('')
   const [tab, setTab] = useState('info')
   const [error, setError] = useState('')
+
+  const [authUser, setAuthUser] = useState(localStorage.getItem('cron_auth_user') || '')
+  const [authPass, setAuthPass] = useState(localStorage.getItem('cron_auth_pass') || '')
+
+  const apiGet = async (path) => {
+    const headers = {}
+    const auth = makeAuthHeader(authUser, authPass)
+    if (auth) headers.Authorization = auth
+    const res = await fetch(`${API}${path}`, { headers })
+    if (!res.ok) throw new Error(`API ${res.status}`)
+    return res.json()
+  }
 
   const loadSummaryAndJobs = async () => {
     try {
@@ -56,6 +63,19 @@ export default function App() {
     }
   }
 
+  const saveAuth = () => {
+    localStorage.setItem('cron_auth_user', authUser)
+    localStorage.setItem('cron_auth_pass', authPass)
+    loadSummaryAndJobs()
+  }
+
+  const clearAuth = () => {
+    setAuthUser('')
+    setAuthPass('')
+    localStorage.removeItem('cron_auth_user')
+    localStorage.removeItem('cron_auth_pass')
+  }
+
   useEffect(() => { loadSummaryAndJobs() }, [])
   useEffect(() => { if (selectedId) loadDetail(selectedId) }, [selectedId])
 
@@ -75,6 +95,13 @@ export default function App() {
       <main style={{ padding: 20 }}>
         <h1 style={{ marginTop: 0 }}>대시보드</h1>
         {error && <div style={{ ...box, borderColor: '#7f1d1d', color: '#fca5a5', marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ ...box, marginBottom: 12, display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 8 }}>
+          <input value={authUser} onChange={(e) => setAuthUser(e.target.value)} placeholder='API 계정' style={{ ...box, color: '#e5e7eb' }} />
+          <input value={authPass} onChange={(e) => setAuthPass(e.target.value)} placeholder='API 비밀번호' type='password' style={{ ...box, color: '#e5e7eb' }} />
+          <button onClick={saveAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 저장/적용</button>
+          <button onClick={clearAuth} style={{ ...box, cursor: 'pointer', color: '#e5e7eb' }}>인증 초기화</button>
+        </div>
 
         <SummaryCards summary={summary} />
 
