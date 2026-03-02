@@ -135,6 +135,10 @@ export default function App() {
   useEffect(() => { loadSummaryAndJobs() }, [])
   useEffect(() => { if (selectedId) loadDetail(selectedId) }, [selectedId])
   useEffect(() => {
+    if (menu === 'dashboard') loadSummaryAndJobs()
+    if (menu === 'news') loadNews()
+  }, [menu])
+  useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 1100)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -151,6 +155,14 @@ export default function App() {
     localStorage.setItem('dash_q', q)
     localStorage.setItem('dash_status', status)
   }, [q, status])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (menu === 'dashboard') loadSummaryAndJobs()
+      if (menu === 'news') loadNews()
+    }, 300000)
+    return () => clearInterval(timer)
+  }, [menu, newsQ, newsCategory, newsSource, newsDays])
 
   const filtered = useMemo(() => jobs.filter((j) => {
     const hit = !q || j.name.toLowerCase().includes(q.toLowerCase()) || j.id.toLowerCase().includes(q.toLowerCase())
