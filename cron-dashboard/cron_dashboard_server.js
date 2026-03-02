@@ -344,9 +344,10 @@ async function loadDetail(id){
 
 document.getElementById('q').addEventListener('input', renderTable);
 document.getElementById('status').addEventListener('input', renderTable);
-document.getElementById('refresh').addEventListener('click', loadJobs);
+document.getElementById('refresh').addEventListener('click', function(){ loadSummary(); loadJobs(); });
+loadSummary();
 loadJobs();
-setInterval(loadJobs, 60000);
+setInterval(function(){ loadSummary(); loadJobs(); }, 60000);
 </script>
 </body></html>`;
 }
@@ -357,6 +358,12 @@ const server = http.createServer(async (req, res) => {
 
     if (u.pathname === '/api/cron/jobs') {
       const data = await getJobs();
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(data));
+    }
+
+    if (u.pathname === '/api/cron/summary') {
+      const data = await getSummary();
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(data));
     }
