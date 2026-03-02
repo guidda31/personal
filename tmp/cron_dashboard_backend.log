@@ -15,3 +15,5 @@ INFO:     127.0.0.1:60890 - "GET /api/cron/jobs/e85c8ba1-b786-488f-8a23-d99518d3
 INFO:     127.0.0.1:60880 - "GET /api/cron/jobs/e85c8ba1-b786-488f-8a23-d99518d389b1/runs?limit=20 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:40698 - "GET /api/cron/summary HTTP/1.1" 200 OK
 INFO:     127.0.0.1:40704 - "GET /api/cron/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35452 - "GET /api/cron/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35464 - "GET /api/cron/jobs HTTP/1.1" 200 OK

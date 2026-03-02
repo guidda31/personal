@@ -4,6 +4,10 @@ BASE="$(cd "$(dirname "$0")" && pwd)"
 TMP_DIR="$BASE/../tmp"
 mkdir -p "$TMP_DIR"
 
+# load optional env files
+[[ -f "$BASE/backend/.env" ]] && set -a && . "$BASE/backend/.env" && set +a
+[[ -f "$BASE/frontend/.env" ]] && set -a && . "$BASE/frontend/.env" && set +a
+
 is_listening() {
   local port="$1"
   ss -ltn "( sport = :$port )" | awk 'NR>1 && $1=="LISTEN" {print}' | grep -q ":$port"
