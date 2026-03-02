@@ -1,0 +1,177 @@
+[PM 고도화 기획안] Cron Dashboard 2.0 (메뉴형 목록 + 상세 페이지)
+작성일: 2026-03-02
+요청자: 구이따
+
+==================================================
+0) 요구사항 요약
+==================================================
+- 대시보드 목록은 하나의 메뉴로 유지
+- 각 Cron 항목 클릭 시 상세 내용을 확인하는 구조
+- 기획 + DB 설계 + 프로세스 설계 선행
+
+==================================================
+1) IA(정보구조) / 화면 기획
+==================================================
+[좌측/상단 메뉴]
+- 메뉴 1: Cron Dashboard
+
+[Cron Dashboard > 목록]
+- 테이블 컬럼(요약):
+  - Name, Status, Next Run, Last Run, Schedule, Agent, Target, Updated
+- 기능:
+  - 검색(name/id)
+  - 상태 필터(ok/idle/error/disabled)
+  - 정렬(Next/Last/Status)
+  - 행 클릭 -> 상세로 이동
+
+[Cron Dashboard > 상세]
+- 섹션 A: 기본 정보
+  - id, name, enabled, schedule(expr/tz), created/updated
+- 섹션 B: 실행 상태
+  - last status, consecutive errors, next run, last duration
+- 섹션 C: Payload/Delivery
+  - payload kind/message 요약, delivery mode/channel/to
+- 섹션 D: 실행 이력(최근 N건)
+  - run time, status, duration, delivered, deliveryStatus
+- 섹션 E: 원본 JSON(디버그)
+
+==================================================
+2) DB 설계 (MariaDB / internal_db)
+==================================================
+A. cron_jobs (현재 스냅샷)
+- id VARCHAR(64) PK
+- name VARCHAR(255) NOT NULL
+- enabled TINYINT(1) NOT NULL DEFAULT 1
+- schedule_kind VARCHAR(16) NOT NULL DEFAULT 'cron'
+- schedule_expr VARCHAR(64) NOT NULL
+- schedule_tz VARCHAR(64) NOT NULL
+- session_target VARCHAR(32) NULL
+- wake_mode VARCHAR(32) NULL
+- agent_id VARCHAR(64) NULL
+- status VARCHAR(32) NOT NULL DEFAULT 'idle'
+- next_run_at_ms BIGINT NULL
+- last_run_at_ms BIGINT NULL
+- last_duration_ms INT NULL
+- last_delivery_status VARCHAR(64) NULL
+- consecutive_errors INT NOT NULL DEFAULT 0
+- payload_kind VARCHAR(32) NULL
+- payload_message MEDIUMTEXT NULL
+- delivery_mode VARCHAR(32) NULL
+- delivery_channel VARCHAR(32) NULL
+- delivery_to VARCHAR(255) NULL
+- raw_json LONGTEXT NULL
+- updated_at_ms BIGINT NOT NULL
+Indexes:
+- idx_jobs_status(status)
+- idx_jobs_name(name)
+- idx_jobs_next(next_run_at_ms)
+- idx_jobs_updated(updated_at_ms)
+
+B. cron_job_runs (이력)
+- run_id BIGINT AUTO_INCREMENT PK
+- job_id VARCHAR(64) NOT NULL
+- run_at_ms BIGINT NOT NULL
+- finished_at_ms BIGINT NULL
+- status VARCHAR(32) NOT NULL
+- duration_ms INT NULL
+- delivered TINYINT(1) NULL
+- delivery_status VARCHAR(64) NULL
+- model VARCHAR(128) NULL
+- provider VARCHAR(64) NULL
+- usage_input_tokens INT NULL
+- usage_output_tokens INT NULL
+- usage_total_tokens INT NULL
+- summary MEDIUMTEXT NULL
+- raw_json LONGTEXT NULL
+- created_at_ms BIGINT NOT NULL
+Indexes:
+- idx_runs_job_time(job_id, run_at_ms DESC)
+- idx_runs_status(status)
+FK:
+- cron_job_runs.job_id -> cron_jobs.id (논리 FK, 물리 FK는 운영 부하 보고 결정)
+
+C. cron_job_sync_log (수집 모니터링)
+- sync_id BIGINT AUTO_INCREMENT PK
+- started_at_ms BIGINT NOT NULL
+- finished_at_ms BIGINT NULL
+- status VARCHAR(16) NOT NULL  -- ok/error
+- jobs_count INT NULL
+- runs_count INT NULL
+- error_message TEXT NULL
+Indexes:
+- idx_sync_started(started_at_ms DESC)
+
+==================================================
+3) 데이터 수집/동기화 프로세스
+==================================================
+[Collector-1: jobs]
+- 주기: 1분
+- 소스: openclaw cron list --json
+- 동작: cron_jobs upsert
+
+[Collector-2: runs]
+- 주기: 3~5분
+- 소스: 각 job별 openclaw cron runs --id <job> --limit N
+- 동작: cron_job_runs append + 중복 방지(unique key: job_id + run_at_ms + status)
+
+[동기화 규칙]
+- jobs는 최신 상태 스냅샷(덮어쓰기)
+- runs는 append-only(감사/추적 목적)
+- 실패 시 sync_log에 error 기록
+
+[정합성 체크]
+- jobs.total vs UI row count 비교
+- 최근 run timestamp 지연 임계치(예: 10분) 감시
+
+==================================================
+4) API 설계 (DB 기반)
+==================================================
+- GET /api/cron/jobs
+  - query: q, status, enabled, sort, page, size
+- GET /api/cron/jobs/:id
+  - job 기본 + payload/delivery + 최근 상태
+- GET /api/cron/jobs/:id/runs
+  - query: limit, status
+- GET /api/cron/summary
+  - 전체 개수, 상태 분포, 지연 잡 수
+
+==================================================
+5) 권한/보안 설계
+==================================================
+- 1차: Read-only (조회 API만)
+- 2차: 수정 API 분리(/admin/*) + Basic Auth/토큰
+- DB 계정 분리 권장:
+  - reader 계정(SELECT only)
+  - collector 계정(INSERT/UPDATE)
+- 외부 공개 시:
+  - reverse proxy + TLS + IP allowlist
+
+==================================================
+6) 실행 프로세스(업무 분배 룰 반영)
+==================================================
+- PM(현재 단계): 요구사항 확정/범위 통제/산출물 승인
+- PL: 기술아키텍처/폴더구조/배포전략 확정
+- Planner: 스프린트/태스크 분해/완료 기준 정의
+- Developer: DB 마이그레이션 + collector + API + UI 상세페이지
+- Tester: 데이터 정합성/필터/상세/오류 시나리오 검증
+
+==================================================
+7) 단계별 일정 제안
+==================================================
+Step 1 (오늘)
+- DB 스키마 확정 + migration SQL 작성
+- 상세 페이지 목업/필드 고정
+
+Step 2 (내일)
+- runs collector + 상세 API + 상세 UI
+
+Step 3
+- 운영 안정화(알림/보안/성능)
+
+==================================================
+8) 즉시 착수 체크리스트(승인용)
+==================================================
+[ ] cron_job_runs 테이블 추가 승인
+[ ] Collector-2(이력 수집 3~5분) 승인
+[ ] 상세페이지 필드셋(섹션 A~E) 승인
+[ ] 1차는 조회 전용(Read-only) 재확인
