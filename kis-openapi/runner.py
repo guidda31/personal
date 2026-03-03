@@ -94,6 +94,7 @@ def load_state() -> dict:
             "realized_pnl_pct": 0.0,
             "trading_disabled_today": False,
             "entry_legs_done": 0,
+            "bot_managed": False,
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
@@ -109,10 +110,13 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
     if st == "Y":
         return False, "거래정지"
 
-    # risk/admin indicators (field names can vary; inspect if present)
-    for k in ("mrkt_warn_cls_code", "iscd_stat_cls_code", "temp_stop_yn"):
+    # risk/admin indicators (conservative but avoid false positives)
+    # NOTE: iscd_stat_cls_code often carries non-risk market state codes (e.g., 55/57),
+    # so we do not hard-block on it here.
+    for k in ("mrkt_warn_cls_code", "temp_stop_yn"):
         v = str(o.get(k, "")).strip().upper()
-        if v and v not in {"0", "N", "NONE"}:
+        # treat common normal codes as safe
+        if v and v not in {"0", "00", "N", "NONE"}:
             return False, f"risk_flag:{k}={v}"
 
     cur = int(o.get("stck_prpr", "0") or 0)
@@ -125,7 +129,8 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
 
 def pick_top_symbol(client: KISClient) -> tuple[str, float, dict]:
     # dynamic shortlist from top-volume universe + tradeability filters
-    symbols = top_volume_symbols(limit=50)
+    # keep shortlist small for timely execution in cron windows
+    symbols = top_volume_symbols(limit=20)
     best = ("", -999.0, {})
     for s in symbols:
         d = client.get_domestic_quote(s)
@@ -258,6 +263,9 @@ def run_once(dry_run: bool, confirm: str | None):
     today = now_kst().strftime("%Y-%m-%d")
 
     state = load_state()
+    if "bot_managed" not in state:
+        state["bot_managed"] = False
+
     if state.get("date") != today:
         state = {
             "date": today,
@@ -268,6 +276,7 @@ def run_once(dry_run: bool, confirm: str | None):
             "realized_pnl_pct": 0.0,
             "trading_disabled_today": False,
             "entry_legs_done": 0,
+            "bot_managed": False,
         }
 
     # 1) Entry window (09:01~10:00, continuous session only)
@@ -276,6 +285,7 @@ def run_once(dry_run: bool, confirm: str | None):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
             return
 
+        log_event("entry_scan_start", {"window": "09:01-10:00", "mode": cfg.mode})
         symbol, score, q = pick_top_symbol(client)
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
@@ -351,10 +361,14 @@ def run_once(dry_run: bool, confirm: str | None):
 
         if total_qty > 0:
             avg_price = int(round(total_cost / total_qty))
-            state.update({"entered": True, "symbol": symbol, "qty": total_qty, "avg_price": avg_price})
+            state.update({"entered": True, "symbol": symbol, "qty": total_qty, "avg_price": avg_price, "bot_managed": True})
             save_state(state)
 
     # 2) Risk/exit monitor
+    if state["entered"] and not state.get("bot_managed", False):
+        log_event("position_skip", {"reason": "non-bot position", "symbol": state.get("symbol", "")})
+        return
+
     if state["entered"]:
         d = client.get_domestic_quote(state["symbol"])
         cur = int(d.get("output", {}).get("stck_prpr", "0") or 0)
@@ -386,7 +400,7 @@ def run_once(dry_run: bool, confirm: str | None):
                         state["trading_disabled_today"] = True
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0})
+                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False})
                     save_state(state)
 
         # force close 15:15~15:19 (continuous only)
@@ -407,7 +421,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 state["trading_disabled_today"] = True
                 log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-            state.update({"entered": False, "qty": 0, "entry_legs_done": 0})
+            state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False})
             save_state(state)
 
 
