@@ -207,8 +207,8 @@ def clamp_order_price_by_krx_limit(price: int, prev_close: int) -> int:
 
 
 def is_continuous_session(t: dt.time) -> bool:
-    # Avoid opening/closing call auction windows
-    return dt.time(9, 1) <= t <= dt.time(15, 19)
+    # Regular continuous session window
+    return dt.time(9, 1) <= t <= dt.time(15, 20)
 
 
 def env_float(name: str, default: float) -> float:
@@ -458,8 +458,8 @@ def run_once(dry_run: bool, confirm: str | None):
                     save_state(state)
 
 
-        # force close 15:15~15:19 (continuous only)
-        if state["entered"] and dt.time(15, 15) <= t <= dt.time(15, 19) and is_continuous_session(t):
+        # force close 15:15~15:20 (continuous only)
+        if state["entered"] and dt.time(15, 15) <= t <= dt.time(15, 20) and is_continuous_session(t):
             defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
             if defer_today:
                 log_event("eod_close_deferred_limit_up", {"symbol": state['symbol'], "entry_date": state.get("entry_date")}, notify=True)
