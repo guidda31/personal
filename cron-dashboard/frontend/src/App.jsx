@@ -281,7 +281,7 @@ export default function App() {
             <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
               <div style={{ fontWeight: 700 }}>{n.title}</div>
               <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
-              <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n.summary || '-').slice(0, 320)}{(n.summary||'').length>320?' ...':''}</div>
+              <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{(n.summary || '-').slice(0, 320)}{(n.summary||'').length>320?' ...':''}</div>
               <div style={{ marginTop: 6, display: 'flex', gap: 10 }}>
                 <button onClick={() => loadNewsDetail(n.id)} style={{ ...box, padding: '4px 8px', cursor: 'pointer', color: '#7dd3fc', fontSize: 12 }}>상세 보기</button>
                 {n.url && <a href={n.url} target='_blank' rel='noreferrer' style={{ color: '#7dd3fc', fontSize: 12 }}>원문 보기</a>}
@@ -370,7 +370,7 @@ export default function App() {
               <div key={n.id} style={{ borderTop: '1px solid #263142', padding: '10px 0' }}>
                 <div style={{ fontWeight: 700 }}>{n.title}</div>
                 <div style={{ color: '#94a3b8', fontSize: 12 }}>{n.source || '-'} · {n.category || '-'} · {n.publishedAtMs ? new Date(n.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
-                <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap' }}>{shortBody}</div>
+                <div style={{ marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{shortBody}</div>
                 <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center' }}>
                   {body.length > 240 && (
                     <button
@@ -415,12 +415,12 @@ export default function App() {
             </div>
             <div style={{ fontWeight:700 }}>{newsDetail.title}</div>
             <div style={{ color:'#94a3b8', fontSize:12 }}>{newsDetail.source || '-'} · {newsDetail.category || '-'} · {newsDetail.publishedAtMs ? new Date(newsDetail.publishedAtMs).toLocaleString('ko-KR') : '-'}</div>
-            <pre style={{ ...box, marginTop:8, whiteSpace:'pre-wrap', maxHeight:260, overflow:'auto' }}>{newsDetail.summary || '-'}</pre>
+            <pre style={{ ...box, marginTop:8, whiteSpace:'pre-wrap', overflowWrap:'anywhere', wordBreak:'break-word', maxHeight:260, overflow:'auto' }}>{newsDetail.summary || '-'}</pre>
             {newsDetail.url && <a href={newsDetail.url} target='_blank' rel='noreferrer' style={{ color:'#7dd3fc', fontSize:12 }}>원문 보기</a>}
           </div>
         )}
         {isMobile && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <button onClick={() => setMenu('dashboard')} style={{ ...box, cursor: 'pointer', color: menu==='dashboard' ? '#7dd3fc' : '#e5e7eb', background: menu==='dashboard' ? '#0b2536' : '#111827' }}>대시보드</button>
             <button onClick={() => { setMenu('news'); loadNews() }} style={{ ...box, cursor: 'pointer', color: menu==='news' ? '#7dd3fc' : '#e5e7eb', background: menu==='news' ? '#0b2536' : '#111827' }}>뉴스</button>
             <button onClick={() => { setMenu('issues'); loadIssueNews() }} style={{ ...box, cursor: 'pointer', color: menu==='issues' ? '#7dd3fc' : '#e5e7eb', background: menu==='issues' ? '#0b2536' : '#111827' }}>이슈</button>
