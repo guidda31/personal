@@ -1,0 +1,540 @@
+[자동 대화 덤프] 2026-03-02 (Asia/Seoul)
+생성시각: 2026-03-03 11:53:53 KST
+
+==================================================
+1) 당일 메모
+==================================================
+# 2026-03-02
+
+- User requested power reporting to always include both current estimated power range (W) and estimated electricity cost together (2026-03-02).
+- Billing-cycle preference fixed: monthly accumulation must follow `current month 17th ~ next month 16th`, labeled as the next month’s bill (e.g., 2/17~3/16 => March bill) (2026-03-02).
+- Daily power reporting automation configured: Telegram delivery at 07:00 with yesterday usage/cost and current billing-cycle cumulative usage/cost (cron: `power-daily-yesterday-0700`) (2026-03-02).
+- Hourly power logging automation configured for accumulation base data (cron: `power-hourly-log`, source file `tmp/power_hourly.csv`) (2026-03-02).
+- GPU sensor path issue resolved for WSL by supporting `/usr/lib/wsl/lib/nvidia-smi`; power estimate script now includes GPU draw when available (2026-03-02).
+
+==================================================
+2) 프로젝트 역할 대화 로그
+==================================================
+[ROLE CHAT LOG]
+- This file stores role-to-role conversation logs (PM/PL/Planner/Developer/Tester).
+- Append new conversation entries in real-time for inclusion in daily dumps.
+
+Format:
+[YYYY-MM-DD HH:MM:SS KST] FROM -> TO
+MESSAGE
+---
+[2026-03-01 22:08:47 KST] PM -> PL
+Phase2 주문 기능 즉시 착수. buy/sell/orders/cancel + real 주문 확인 가드 포함 설계 고정.
+---
+[2026-03-01 22:08:47 KST] PL -> Developer
+client.py 주문 TR ID/POST 공통 호출기, main.py 주문 CLI 추가 진행.
+---
+[2026-03-01 22:08:47 KST] Developer -> Tester
+주문 기능 반영 완료. dry-run 및 confirm 가드 포함. 검증 요청.
+---
+[2026-03-01 22:08:47 KST] Tester -> PM
+시세/계좌 PASS. 장외 실주문은 APBK0919. 취소는 유효 주문번호 필요(APBK0344).
+---
+
+==================================================
+3) 프로젝트 역할 산출물(inbox/outbox)
+==================================================
+
+- 파일: project/developer/inbox/TASK-20260301-DEV-001.json
+{
+  "taskId": "TASK-20260301-DEV-001",
+  "fromRole": "pm",
+  "toRole": "developer",
+  "title": "Phase1 구현",
+  "objective": "KIS client/main에 호가/체결/일봉/계좌조회 기능 구현",
+  "inputs": ["PL 설계", "기존 client.py/main.py"],
+  "deliverables": ["코드 변경", "실행 예시"],
+  "acceptanceCriteria": ["CLI 명령 4개 추가", "py_compile 통과", "기본 호출 동작"],
+  "priority": "P0",
+  "due": "2026-03-01 20:20 KST",
+  "notes": "개발 결과는 developer/outbox + 코드 반영"
+}
+
+- 파일: project/developer/inbox/TASK-20260301-DEV-002.json
+{
+  "taskId": "TASK-20260301-DEV-002",
+  "fromRole": "pm",
+  "toRole": "developer",
+  "title": "Phase2 주문 기능 구현",
+  "objective": "buy/sell/order-inquiry/cancel 명령을 구현하고 dry-run 가드 추가",
+  "inputs": ["PL 설계", "Phase1 코드"],
+  "deliverables": ["client/main 코드 변경", "실행 예시"],
+  "acceptanceCriteria": ["mock에서 주문 요청 성공", "real 주문은 confirm 키 요구"],
+  "priority": "P0",
+  "due": "2026-03-01 20:35 KST",
+  "notes": "developer/outbox REPORT + 코드 커밋"
+}
+
+- 파일: project/developer/inbox/TASK-20260301-DEV-003.json
+{
+  "taskId":"TASK-20260301-DEV-003",
+  "title":"실전 실행 플로우 구현",
+  "scope":["runner.py 생성","전략→주문→손절/청산 상태머신","알림 훅"],
+  "priority":"P0",
+  "due":"2026-03-01 22:10 KST"
+}
+
+- 파일: project/developer/outbox/REPORT-20260301-DEV-001.json
+{
+  "reportId": "REPORT-20260301-DEV-001",
+  "role": "developer",
+  "taskId": "TASK-20260301-DEV-001",
+  "status": "done",
+  "summary": "main.py CLI 확장 및 Phase1 구현 반영 완료.",
+  "outputs": [
+    "명령 추가: orderbook, conclusion, daily, balance",
+    "py_compile 통과",
+    "quote/orderbook/conclusion/daily 실호출 성공"
+  ],
+  "issues": [
+    "balance 호출은 계좌값 문제로 OPSQ2000(INVALID_CHECK_ACNO)"
+  ],
+  "nextActions": [
+    "KIS_ACCOUNT_NO 입력 규칙 재확인",
+    "balance 파라미터 문서 재검증"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}
+
+- 파일: project/pl/inbox/TASK-20260301-PL-001.json
+{
+  "taskId": "TASK-20260301-PL-001",
+  "fromRole": "pm",
+  "toRole": "pl",
+  "title": "KIS OpenAPI Phase1 기술 설계/경로 검증",
+  "objective": "호가/체결/일봉/계좌조회 API의 경로, 파라미터, TR ID 매핑 정리",
+  "inputs": ["apiportal.koreainvestment.com 문서", "kis-openapi/docs"],
+  "deliverables": ["TR ID 매핑표", "요청 파라미터 표준안", "에러 처리 기준"],
+  "acceptanceCriteria": ["모든 Phase1 엔드포인트 매핑 완료", "mock/real 분기 기준 명시"],
+  "priority": "P0",
+  "due": "2026-03-01 20:00 KST",
+  "notes": "설계 산출물은 pl/outbox로 전달"
+}
+
+- 파일: project/pl/inbox/TASK-20260301-PL-002.json
+{
+  "taskId": "TASK-20260301-PL-002",
+  "fromRole": "pm",
+  "toRole": "pl",
+  "title": "Phase2 주문 API 설계",
+  "objective": "현금 매수/매도/주문조회/정정/취소를 위한 엔드포인트·TR ID·필수 파라미터 설계",
+  "inputs": ["KIS API 문서", "Phase1 코드베이스"],
+  "deliverables": ["주문 API 설계서", "TR ID 매핑", "리스크 가드 설계"],
+  "acceptanceCriteria": ["실전/모의 분기 명시", "주문 전 검증 항목 정의"],
+  "priority": "P0",
+  "due": "2026-03-01 20:20 KST",
+  "notes": "설계 결과를 pl/outbox REPORT로 제출"
+}
+
+- 파일: project/pl/inbox/TASK-20260302-kis-daytrade-top3.json
+{
+  "taskId": "TASK-20260302-kis-daytrade-top3",
+  "from": "PM",
+  "to": "PL",
+  "title": "kis-daytrade-live 고도화 TOP3 코드 반영",
+  "priority": "high",
+  "items": [
+    "분할 진입(TWAP-lite)",
+    "변동성 기반 동적 포지션 사이즈",
+    "일일 손실 한도(Daily Stop)"
+  ],
+  "acceptance": [
+    "runner.py 문법 검사 통과",
+    "dry-run 실행 오류 없음",
+    "변경사항 git push"
+  ]
+}
+
+- 파일: project/pl/outbox/PLAN-20260301-PHASE2.json
+{
+  "docId": "PLAN-20260301-PHASE2",
+  "workstreams": [
+    {"track":"전략","owner":"developer","tasks":["상승확률 스코어러","ETF 제외 후보군","Top1 선정"]},
+    {"track":"주문","owner":"developer","tasks":["현금 매수/매도","주문조회/취소","실전 확인가드"]},
+    {"track":"청산","owner":"developer","tasks":["-10% 손절","마감 강제청산"]},
+    {"track":"알림","owner":"developer","tasks":["이벤트 텔레그램 송신 훅","오류/예외 알림"]},
+    {"track":"테스트","owner":"tester","tasks":["진입/손절/마감청산 케이스","실패 재현 로그"]}
+  ],
+  "updatedAt": "2026-03-01 21:41 KST"
+}
+
+- 파일: project/pl/outbox/REPORT-20260301-PL-001.json
+{
+  "reportId": "REPORT-20260301-PL-001",
+  "role": "pl",
+  "taskId": "TASK-20260301-PL-001",
+  "status": "done",
+  "summary": "Phase1 기술 설계 반영 완료. 시세(현재가/호가/체결/일봉) + 계좌조회 엔드포인트를 client 단에 모듈화.",
+  "outputs": [
+    "client.py: _get 공통 호출기/재시도 추가",
+    "client.py: get_domestic_orderbook/get_domestic_conclusion/get_domestic_daily/get_balance 추가",
+    "TR ID 매핑 확장"
+  ],
+  "issues": [
+    "계좌조회는 KIS_ACCOUNT_NO 형식/값 검증 필요(현재 INVALID_CHECK_ACNO 응답 확인)"
+  ],
+  "nextActions": [
+    "계좌번호 규칙 검증 및 파라미터 보정",
+    "주문 API 설계 착수"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}
+
+- 파일: project/planner/inbox/TASK-20260301-PLAN-001.json
+{
+  "taskId": "TASK-20260301-PLAN-001",
+  "fromRole": "pm",
+  "toRole": "planner",
+  "title": "Phase1 요구사항/수용기준 정리",
+  "objective": "호가/체결/일봉/계좌조회 기능의 사용자 관점 시나리오와 AC 정의",
+  "inputs": ["PM 지시사항", "기존 kis-openapi 구현"],
+  "deliverables": ["기능 요구사항", "수용기준(AC)", "출력 포맷 정의"],
+  "acceptanceCriteria": ["각 기능별 AC 3개 이상"],
+  "priority": "P1",
+  "due": "2026-03-01 20:10 KST",
+  "notes": "산출물은 planner/outbox로 전달"
+}
+
+- 파일: project/planner/inbox/TASK-20260301-PLAN-002.json
+{
+  "taskId": "TASK-20260301-PLAN-002",
+  "fromRole": "pm",
+  "toRole": "planner",
+  "title": "Phase2 수용기준/정책 정의",
+  "objective": "주문 기능의 사용자 시나리오와 승인 정책(dry-run, real 주문 확인)을 정의",
+  "inputs": ["PM 지시", "PL 설계안"],
+  "deliverables": ["요구사항", "수용기준(AC)", "운영 정책"],
+  "acceptanceCriteria": ["주문/정정/취소 각 AC 정의", "실주문 안전장치 명시"],
+  "priority": "P1",
+  "due": "2026-03-01 20:25 KST",
+  "notes": "planner/outbox REPORT 제출"
+}
+
+- 파일: project/planner/outbox/AC-20260301-PHASE2.json
+{
+  "docId": "AC-20260301-PHASE2",
+  "acceptanceCriteria": [
+    {"id":"AC-01","text":"장 시작 후 1개 종목이 자동 선정되고 이유(점수 근거)가 로그에 남는다."},
+    {"id":"AC-02","text":"주문가능금액 100% 기준 수량 계산이 수행된다."},
+    {"id":"AC-03","text":"매수 체결 후 손익 모니터링이 시작된다."},
+    {"id":"AC-04","text":"손실률 -10% 도달 시 즉시 매도 주문이 발생한다."},
+    {"id":"AC-05","text":"마감 청산 시각 이전에 미청산 포지션은 강제 청산된다."},
+    {"id":"AC-06","text":"모든 이벤트가 텔레그램으로 송신된다."}
+  ],
+  "updatedAt": "2026-03-01 21:40 KST"
+}
+
+- 파일: project/planner/outbox/REPORT-20260301-PLAN-001.json
+{
+  "reportId": "REPORT-20260301-PLAN-001",
+  "role": "planner",
+  "taskId": "TASK-20260301-PLAN-001",
+  "status": "done",
+  "summary": "Phase1 기능 요구/수용기준 정리 완료",
+  "outputs": [
+    "시세 조회 4종(현재가/호가/체결/일봉) 응답 JSON 출력",
+    "계좌조회 balance 명령 제공",
+    "각 명령 실패 시 표준 에러 메시지 반환"
+  ],
+  "issues": [
+    "계좌 관련 AC는 계좌값 유효성 확인 후 최종 완료 처리 필요"
+  ],
+  "nextActions": [
+    "Phase2 주문/계좌 고도화 요구사항 작성"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}
+
+- 파일: project/planner/outbox/REQ-20260301-PHASE2.json
+{
+  "docId": "REQ-20260301-PHASE2",
+  "title": "KIS DayTrading Auto v1 요구사항",
+  "scope": "실전 데이트레이딩 자동화 (당일 매수/당일 청산)",
+  "policies": {
+    "capital": "주문가능금액 100% 사용",
+    "universe": "KOSPI/KOSDAQ, ETF/ETN 제외",
+    "entry": "당일 1회 진입, 시장가/지정가/분할진입 허용",
+    "exit": "손절 -10%, 목표수익은 동적 판단, 장마감 전 청산",
+    "risk": "추가 리스크 제한 없음",
+    "ops": "모의투자 없이 실전, 모든 이벤트 알림"
+  },
+  "functionalRequirements": [
+    "FR-01: 장 시작 후 상승확률 상위 1종목 자동 선정",
+    "FR-02: 주문가능금액 기반 수량 계산 후 매수 주문",
+    "FR-03: 실시간 손익 추적, -10% 도달 시 즉시 손절",
+    "FR-04: 장마감 전 강제 청산",
+    "FR-05: 선정/주문/청산/오류를 텔레그램으로 실시간 알림"
+  ],
+  "nonFunctionalRequirements": [
+    "NFR-01: API 실패 시 재시도",
+    "NFR-02: 실행 로그 JSON 저장",
+    "NFR-03: 민감정보 마스킹"
+  ],
+  "updatedAt": "2026-03-01 21:40 KST"
+}
+
+- 파일: project/pm/outbox/REPORT-20260301-001.json
+{
+  "reportId": "REPORT-20260301-001",
+  "role": "pm",
+  "taskId": "TASK-20260301-PHASE1",
+  "status": "in_progress",
+  "summary": "KIS OpenAPI Phase1(호가/체결/일봉/계좌) 병렬 개발 킥오프. 역할별 작업 분배 및 1차 구현 착수.",
+  "outputs": [
+    "역할별 TASK 배정 파일 생성",
+    "PL 설계 반영: client/main 확장 구현 시작"
+  ],
+  "issues": [
+    "현재 멀티 에이전트 런타임 제약으로 역할 병렬은 파일 기반 핸드오프 방식으로 운영"
+  ],
+  "nextActions": [
+    "PL: API 경로/TR-ID 검증 표 작성",
+    "Developer: 구현/CLI 연결",
+    "Tester: 모의환경 테스트 케이스 실행"
+  ],
+  "updatedAt": "2026-03-01 19:45 KST"
+}
+
+- 파일: project/tester/inbox/TASK-20260301-QA-001.json
+{
+  "taskId": "TASK-20260301-QA-001",
+  "fromRole": "pm",
+  "toRole": "tester",
+  "title": "Phase1 테스트",
+  "objective": "mock 기준 quote/orderbook/conclusion/daily/balance 테스트 케이스 수행",
+  "inputs": ["개발 산출물", "테스트 계정 env"],
+  "deliverables": ["테스트 결과 리포트", "실패 케이스/재현 절차"],
+  "acceptanceCriteria": ["성공/실패 기준 명확", "재현 가능 로그 포함"],
+  "priority": "P0",
+  "due": "2026-03-01 20:30 KST",
+  "notes": "결과는 tester/outbox로 전달"
+}
+
+- 파일: project/tester/inbox/TASK-20260301-QA-002.json
+{
+  "taskId": "TASK-20260301-QA-002",
+  "fromRole": "pm",
+  "toRole": "tester",
+  "title": "Phase2 테스트",
+  "objective": "주문 관련 명령의 성공/실패 케이스를 검증",
+  "inputs": ["개발 산출물", "테스트 계좌"],
+  "deliverables": ["테스트 리포트", "버그/재현 절차"],
+  "acceptanceCriteria": ["dry-run 동작 확인", "안전장치 미충족 시 차단 확인"],
+  "priority": "P0",
+  "due": "2026-03-01 20:45 KST",
+  "notes": "tester/outbox REPORT 제출"
+}
+
+- 파일: project/tester/inbox/TASK-20260301-QA-003.json
+{
+  "taskId":"TASK-20260301-QA-003",
+  "title":"실전 플로우 테스트",
+  "scope":["dry-run 흐름 검증","손절 -10% 트리거 검증","마감청산 검증"],
+  "priority":"P0",
+  "due":"2026-03-01 22:20 KST"
+}
+
+- 파일: project/tester/outbox/REPORT-20260301-QA-001.json
+{
+  "reportId": "REPORT-20260301-QA-001",
+  "role": "tester",
+  "taskId": "TASK-20260301-QA-001",
+  "status": "in_progress",
+  "summary": "Phase1 테스트 수행 결과: 시세 API 4개 성공, 계좌조회 1개 실패",
+  "outputs": [
+    "PASS: quote(005930)",
+    "PASS: orderbook(005930)",
+    "PASS: conclusion(005930)",
+    "PASS: daily(005930)",
+    "FAIL: balance -> OPSQ2000 INPUT INVALID_CHECK_ACNO"
+  ],
+  "issues": [
+    "KIS_ACCOUNT_NO 포맷/값 불일치 가능성",
+    "계좌조회 파라미터 문서 재확인 필요"
+  ],
+  "nextActions": [
+    "계좌번호 형식 검증 후 재테스트",
+    "mock 계좌 기준 샘플 값 점검"
+  ],
+  "updatedAt": "2026-03-01 19:47 KST"
+}
+
+- 파일: project/tester/outbox/REPORT-20260302-kis-daytrade-top3.json
+{
+  "taskId": "TASK-20260302-kis-daytrade-top3",
+  "result": "pass",
+  "checks": [
+    "python3 -m py_compile kis-openapi/runner.py",
+    "python3 kis-openapi/runner.py --dry-run"
+  ],
+  "notes": [
+    "dry-run에서 조건 미충족 시 로그 출력이 없을 수 있음(진입 시간/조건 의존)",
+    "핵심 고도화 로직(분할진입/동적사이징/일일손실한도) 코드 반영 확인"
+  ]
+}
+
+==================================================
+4) Git 변경 요약(2026-03-02 커밋)
+==================================================
+bc4a85b Adjust healthcheck to treat auth-protected API as healthy
+b4d7289 Polish dashboard header copy and visual hierarchy
+c9044ca Add dashboard deployment and operations checklist
+54712ff Harden startup health checks and add auth toggle scripts
+cd78ef2 Refine dashboard UX: mobile layout, status visuals, auth state
+5eb17c9 Add auth end-to-end check script for dashboard API
+e2589c9 Add Python collector and switch cron sync pipeline
+9be323e auto: workspace sync (2026-03-02 22:40:01 KST)
+99ff4a7 auto: workspace sync (2026-03-02 22:39:01 KST)
+f987222 auto: workspace sync (2026-03-02 22:38:01 KST)
+ff2b294 auto: workspace sync (2026-03-02 22:37:01 KST)
+c0ced5c Add Vite proxy config and default frontend API to same-origin
+972aebd auto: workspace sync (2026-03-02 22:36:01 KST)
+9b4e402 auto: workspace sync (2026-03-02 22:34:59 KST)
+9f94c0c auto: workspace sync (2026-03-02 22:34:02 KST)
+5510d9e auto: workspace sync (2026-03-02 22:33:01 KST)
+e5e801a auto: workspace sync (2026-03-02 22:32:01 KST)
+e9e1871 auto: workspace sync (2026-03-02 22:31:01 KST)
+1abf1f4 auto: workspace sync (2026-03-02 22:30:01 KST)
+ac3895c auto: workspace sync (2026-03-02 22:29:01 KST)
+aa06b97 auto: workspace sync (2026-03-02 22:28:01 KST)
+5702f92 auto: workspace sync (2026-03-02 22:27:01 KST)
+ef135ea auto: workspace sync (2026-03-02 22:26:01 KST)
+97932e2 auto: workspace sync (2026-03-02 22:25:01 KST)
+7910abd auto: workspace sync (2026-03-02 22:24:01 KST)
+cac86c2 auto: workspace sync (2026-03-02 22:23:01 KST)
+a4a6bdd Step2: implement React detail tabs with FastAPI endpoints
+2285f59 auto: workspace sync (2026-03-02 22:22:01 KST)
+22d52f1 auto: workspace sync (2026-03-02 22:21:02 KST)
+ed28d49 auto: workspace sync (2026-03-02 22:20:01 KST)
+bdad091 auto: workspace sync (2026-03-02 22:19:01 KST)
+abcc6c0 auto: workspace sync (2026-03-02 22:18:01 KST)
+ecafda0 auto: workspace sync (2026-03-02 22:17:02 KST)
+1b34d91 auto: workspace sync (2026-03-02 22:16:01 KST)
+5fa8c83 auto: workspace sync (2026-03-02 22:15:01 KST)
+6ffa06c auto: workspace sync (2026-03-02 22:14:01 KST)
+2c5e483 Step1: polish detail tabs UI for cron dashboard
+c8f37be auto: workspace sync (2026-03-02 22:13:01 KST)
+c5112ac auto: workspace sync (2026-03-02 22:12:01 KST)
+20f7f00 auto: workspace sync (2026-03-02 22:11:02 KST)
+8678413 auto: workspace sync (2026-03-02 22:10:01 KST)
+c98ce2f auto: workspace sync (2026-03-02 22:09:01 KST)
+4735abf auto: workspace sync (2026-03-02 22:08:01 KST)
+fbd6dfa auto: workspace sync (2026-03-02 22:07:01 KST)
+bdfc4e5 auto: workspace sync (2026-03-02 22:06:01 KST)
+0881e02 auto: workspace sync (2026-03-02 22:05:01 KST)
+28b2d10 auto: workspace sync (2026-03-02 22:04:01 KST)
+c2c15b1 auto: workspace sync (2026-03-02 22:03:02 KST)
+be0f7ad auto: workspace sync (2026-03-02 22:02:01 KST)
+881bcf1 auto: workspace sync (2026-03-02 22:01:01 KST)
+6eb7802 auto: workspace sync (2026-03-02 22:00:01 KST)
+fe32f44 auto: workspace sync (2026-03-02 21:59:01 KST)
+493bdf9 auto: workspace sync (2026-03-02 21:58:01 KST)
+c6f466d auto: workspace sync (2026-03-02 21:57:01 KST)
+378dfb3 auto: workspace sync (2026-03-02 21:56:01 KST)
+41debf9 auto: workspace sync (2026-03-02 21:55:01 KST)
+65abc89 auto: workspace sync (2026-03-02 21:54:01 KST)
+93c44e9 auto: workspace sync (2026-03-02 21:53:01 KST)
+bd27674 auto: workspace sync (2026-03-02 21:52:01 KST)
+8e7c189 auto: workspace sync (2026-03-02 21:51:01 KST)
+21f84ea auto: workspace sync (2026-03-02 21:50:01 KST)
+6e23336 auto: workspace sync (2026-03-02 21:49:01 KST)
+4c62438 auto: workspace sync (2026-03-02 21:48:01 KST)
+35cb3d0 auto: workspace sync (2026-03-02 21:47:01 KST)
+9730d45 auto: workspace sync (2026-03-02 21:46:01 KST)
+3d8d81b auto: workspace sync (2026-03-02 21:45:01 KST)
+7ffc6ab auto: workspace sync (2026-03-02 21:44:01 KST)
+29fc46c auto: workspace sync (2026-03-02 21:43:01 KST)
+02212da auto: workspace sync (2026-03-02 21:42:01 KST)
+01ca133 auto: workspace sync (2026-03-02 21:41:01 KST)
+a706b40 auto: workspace sync (2026-03-02 21:40:01 KST)
+b188920 auto: workspace sync (2026-03-02 21:39:01 KST)
+b7ef8de auto: workspace sync (2026-03-02 21:38:01 KST)
+5c06953 auto: workspace sync (2026-03-02 21:37:01 KST)
+cf18571 auto: workspace sync (2026-03-02 21:36:01 KST)
+84f797f auto: workspace sync (2026-03-02 21:35:01 KST)
+43d1d6e auto: workspace sync (2026-03-02 21:34:01 KST)
+b9fbf02 auto: workspace sync (2026-03-02 21:33:02 KST)
+d2417c7 Enhance dashboard UI with summary cards and summary API
+990a448 auto: workspace sync (2026-03-02 21:32:01 KST)
+c928a3b auto: workspace sync (2026-03-02 21:31:01 KST)
+e73e207 auto: workspace sync (2026-03-02 21:30:01 KST)
+593e7ec auto: workspace sync (2026-03-02 21:29:01 KST)
+946a668 auto: workspace sync (2026-03-02 21:28:01 KST)
+f3d16eb auto: workspace sync (2026-03-02 21:27:01 KST)
+2d76cc9 auto: workspace sync (2026-03-02 21:26:01 KST)
+7c4e97b auto: workspace sync (2026-03-02 21:25:01 KST)
+58c7cde auto: workspace sync (2026-03-02 21:24:02 KST)
+c7dfcf4 auto: workspace sync (2026-03-02 21:23:02 KST)
+4c5a3d3 auto: workspace sync (2026-03-02 21:22:01 KST)
+63271c2 Add PM advanced plan for cron dashboard detail architecture
+d13bf9e auto: workspace sync (2026-03-02 21:21:01 KST)
+fc9ff15 auto: workspace sync (2026-03-02 21:20:02 KST)
+83d399c auto: workspace sync (2026-03-02 21:19:02 KST)
+b609adf auto: workspace sync (2026-03-02 21:18:01 KST)
+2c8e346 auto: workspace sync (2026-03-02 21:17:01 KST)
+6dce565 auto: workspace sync (2026-03-02 21:16:01 KST)
+14f696c auto: workspace sync (2026-03-02 21:15:01 KST)
+52b91a5 Update cron dashboard paths to workspace root folder
+7090c57 auto: workspace sync (2026-03-02 21:14:01 KST)
+bc8a021 auto: workspace sync (2026-03-02 21:13:01 KST)
+152a3db Move cron dashboard into project/cron-dashboard
+c6576cb auto: workspace sync (2026-03-02 21:12:01 KST)
+0205dff auto: workspace sync (2026-03-02 21:11:01 KST)
+a7adf71 Switch cron dashboard collector to MariaDB-backed sync
+56538d2 auto: workspace sync (2026-03-02 21:10:02 KST)
+e502441 Fix cron dashboard web rendering for browser access
+197b245 auto: workspace sync (2026-03-02 21:07:01 KST)
+b58323e Update PM plan with web access requirement
+31b984d Add PM plan for web cron dashboard
+b06d1f8 auto: workspace sync (2026-03-02 21:01:01 KST)
+d2197f5 auto: workspace sync (2026-03-02 20:59:59 KST)
+6b8e9ff Add relay watchdog cron installer script
+94c0407 auto: workspace sync (2026-03-02 20:35:01 KST)
+edab40d auto: workspace sync (2026-03-02 20:01:01 KST)
+573ad2e auto: workspace sync (2026-03-02 19:01:01 KST)
+ba05ed0 auto: workspace sync (2026-03-02 18:01:01 KST)
+a12e5cb auto: workspace sync (2026-03-02 17:01:01 KST)
+e91fcba Add daytrade env tuning profiles (conservative/neutral/aggressive)
+31541eb Implement daytrade TOP3: split entry, volatility sizing, and daily loss guard
+4f1e138 auto: workspace sync (2026-03-02 16:16:02 KST)
+b949c15 PM: daytrade upgrade TOP10 with actionable code change plan
+1468355 auto: workspace sync (2026-03-02 16:01:01 KST)
+db1e657 auto: workspace sync (2026-03-02 15:01:01 KST)
+dcf755f auto: workspace sync (2026-03-02 14:01:01 KST)
+da3ac8b auto: workspace sync (2026-03-02 13:01:01 KST)
+13390f5 auto: workspace sync (2026-03-02 12:45:01 KST)
+7b112ac auto: workspace sync (2026-03-02 12:44:01 KST)
+2cdc80b auto: workspace sync (2026-03-02 12:41:00 KST)
+5802056 auto: workspace sync (2026-03-02 12:35:00 KST)
+1e5fb20 auto: workspace sync (2026-03-02 12:34:01 KST)
+1a403e4 auto: workspace sync (2026-03-02 12:33:02 KST)
+b0a1318 auto: workspace sync (2026-03-02 12:27:00 KST)
+6553e28 auto: workspace sync (2026-03-02 12:26:01 KST)
+966ca54 auto: workspace sync (2026-03-02 12:24:01 KST)
+5809bd4 auto: workspace sync (2026-03-02 12:13:02 KST)
+8f26be7 auto: workspace sync (2026-03-02 12:01:01 KST)
+fcadda0 auto: workspace sync (2026-03-02 11:59:02 KST)
+d0f829e auto: workspace sync (2026-03-02 11:40:00 KST)
+f36c59d auto: workspace sync (2026-03-02 11:01:02 KST)
+167c764 auto: workspace sync (2026-03-02 10:01:01 KST)
+c0b47af auto: workspace sync (2026-03-02 09:01:01 KST)
+602cd00 auto: workspace sync (2026-03-02 08:31:02 KST)
+3c3814e auto: workspace sync (2026-03-02 08:01:02 KST)
+5a895ba Add VI/halt/admin tradeability filters to daytrading runner
+1af4346 Harden daytrading runner with KRX ±30% price guard, tick rounding, and continuous-session checks
+9555b2b Cap day-trading target/stop within KRX ±30% daily limit
+d888806 auto: workspace sync (2026-03-02 07:01:02 KST)
+16ca9ec auto: workspace sync (2026-03-02 06:01:01 KST)
+a1238b7 auto: workspace sync (2026-03-02 05:01:01 KST)
+cdf1c39 auto: workspace sync (2026-03-02 04:01:01 KST)
+9f93eb6 auto: workspace sync (2026-03-02 03:01:01 KST)
+c3c0906 auto: workspace sync (2026-03-02 02:01:01 KST)
+205c544 auto: workspace sync (2026-03-02 01:01:01 KST)
+27d0595 auto: workspace sync (2026-03-02 00:01:02 KST)
+
+[끝]
