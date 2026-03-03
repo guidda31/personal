@@ -33,6 +33,7 @@ from client import KISClient, load_config_from_env
 from notifier import send_telegram
 
 STATE_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_state.json")
+TRADE_LOG_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_trades.jsonl")
 
 UA = "Mozilla/5.0"
 
@@ -103,6 +104,21 @@ def load_state() -> dict:
 
 def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def append_trade_history(side: str, symbol: str, qty: int, price: int, **extra):
+    row = {
+        "ts": now_kst().strftime("%Y-%m-%d %H:%M:%S KST"),
+        "date": now_kst().strftime("%Y-%m-%d"),
+        "side": side,
+        "symbol": symbol,
+        "qty": int(qty),
+        "price": int(price),
+    }
+    row.update(extra or {})
+    TRADE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with TRADE_LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def is_tradeable_quote(o: dict) -> tuple[bool, str]:
@@ -356,6 +372,15 @@ def run_once(dry_run: bool, confirm: str | None):
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_buy(symbol=symbol, qty=leg_qty, price=leg_price, ord_dvsn="00")
                 log_event("buy_submitted", {"symbol": symbol, "leg": i, "qty": leg_qty, "price": leg_price, "result": res}, notify=True)
+                append_trade_history(
+                    "BUY",
+                    symbol,
+                    leg_qty,
+                    leg_price,
+                    leg=i,
+                    is_limit_up_buy=bool(leg_price >= up_limit_price),
+                    order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                )
 
             total_qty += leg_qty
             total_cost += leg_qty * leg_price
@@ -414,6 +439,14 @@ def run_once(dry_run: bool, confirm: str | None):
                             raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                         res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
                         log_event("stoploss_sell", {"result": res}, notify=True)
+                        append_trade_history(
+                            "SELL",
+                            state["symbol"],
+                            qty,
+                            sell_price,
+                            reason="stoploss",
+                            order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                        )
 
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
@@ -441,6 +474,14 @@ def run_once(dry_run: bool, confirm: str | None):
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
                 log_event("eod_close_sell", {"result": res}, notify=True)
+                append_trade_history(
+                    "SELL",
+                    state["symbol"],
+                    qty,
+                    sell_price,
+                    reason="eod_close",
+                    order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                )
 
             trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
             state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
