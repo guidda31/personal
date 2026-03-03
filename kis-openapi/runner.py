@@ -95,6 +95,8 @@ def load_state() -> dict:
             "trading_disabled_today": False,
             "entry_legs_done": 0,
             "bot_managed": False,
+            "entry_date": "",
+            "defer_sell_next_day": False,
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
@@ -265,19 +267,21 @@ def run_once(dry_run: bool, confirm: str | None):
     state = load_state()
     if "bot_managed" not in state:
         state["bot_managed"] = False
+    if "entry_date" not in state:
+        state["entry_date"] = ""
+    if "defer_sell_next_day" not in state:
+        state["defer_sell_next_day"] = False
 
     if state.get("date") != today:
-        state = {
-            "date": today,
-            "entered": False,
-            "symbol": "",
-            "qty": 0,
-            "avg_price": 0,
-            "realized_pnl_pct": 0.0,
-            "trading_disabled_today": False,
-            "entry_legs_done": 0,
-            "bot_managed": False,
-        }
+        # Day rollover: keep open position context, reset daily counters only.
+        state["date"] = today
+        state["realized_pnl_pct"] = 0.0
+        state["trading_disabled_today"] = False
+        state["entry_legs_done"] = 0
+        if state.get("defer_sell_next_day") and state.get("entry_date") != today:
+            # Next day reached -> allow sell from today.
+            state["defer_sell_next_day"] = False
+        save_state(state)
 
     # 1) Entry window (09:01~10:00, continuous session only)
     if not state["entered"] and dt.time(9, 1) <= t <= dt.time(10, 0) and is_continuous_session(t):
@@ -309,6 +313,7 @@ def run_once(dry_run: bool, confirm: str | None):
 
         total_qty = 0
         total_cost = 0
+        bought_at_upper_limit = False
 
         log_event(
             "select",
@@ -333,6 +338,7 @@ def run_once(dry_run: bool, confirm: str | None):
             leg_raw = int(q_now.get("stck_prpr", "0") or raw_price)
             leg_prev = int(q_now.get("stck_sdpr", "0") or prev_close)
             leg_price = clamp_order_price_by_krx_limit(leg_raw, leg_prev)
+            up_limit_price = clamp_order_price_by_krx_limit(int(leg_prev * 2), leg_prev)
 
             remaining_cash = max(0, usable_cash - total_cost)
             leg_budget = int(usable_cash * w)
@@ -353,6 +359,8 @@ def run_once(dry_run: bool, confirm: str | None):
 
             total_qty += leg_qty
             total_cost += leg_qty * leg_price
+            if leg_price >= up_limit_price:
+                bought_at_upper_limit = True
             state["entry_legs_done"] = i
             save_state(state)
 
@@ -361,7 +369,17 @@ def run_once(dry_run: bool, confirm: str | None):
 
         if total_qty > 0:
             avg_price = int(round(total_cost / total_qty))
-            state.update({"entered": True, "symbol": symbol, "qty": total_qty, "avg_price": avg_price, "bot_managed": True})
+            state.update({
+                "entered": True,
+                "symbol": symbol,
+                "qty": total_qty,
+                "avg_price": avg_price,
+                "bot_managed": True,
+                "entry_date": today,
+                "defer_sell_next_day": bool(bought_at_upper_limit),
+            })
+            if bought_at_upper_limit:
+                log_event("sell_deferred_limit_up", {"symbol": symbol, "entry_date": today}, notify=True)
             save_state(state)
 
     # 2) Risk/exit monitor
@@ -379,11 +397,14 @@ def run_once(dry_run: bool, confirm: str | None):
             pnl = (cur - avg) / avg * 100
             prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
             sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
-            log_event("monitor", {"symbol": state['symbol'], "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price})
+            defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
+            log_event("monitor", {"symbol": state['symbol'], "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today})
 
             # stop loss -10%
             if pnl <= -10.0:
-                if not is_continuous_session(t):
+                if defer_today:
+                    log_event("stoploss_deferred_limit_up", {"symbol": state['symbol'], "pnl_pct": round(pnl, 2)}, notify=True)
+                elif not is_continuous_session(t):
                     log_event("stoploss_wait", {"symbol": state['symbol'], "reason": "not continuous session"}, notify=True)
                 else:
                     if dry_run:
@@ -400,11 +421,17 @@ def run_once(dry_run: bool, confirm: str | None):
                         state["trading_disabled_today"] = True
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False})
+                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False, "defer_sell_next_day": False})
                     save_state(state)
+
 
         # force close 15:15~15:19 (continuous only)
         if state["entered"] and dt.time(15, 15) <= t <= dt.time(15, 19) and is_continuous_session(t):
+            defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
+            if defer_today:
+                log_event("eod_close_deferred_limit_up", {"symbol": state['symbol'], "entry_date": state.get("entry_date")}, notify=True)
+                return
+
             prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
             sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
             if dry_run:
@@ -421,7 +448,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 state["trading_disabled_today"] = True
                 log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-            state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False})
+            state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False, "defer_sell_next_day": False})
             save_state(state)
 
 
