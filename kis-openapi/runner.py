@@ -284,6 +284,19 @@ def daily_loss_guard(state: dict) -> bool:
     return realized <= -max_loss_pct
 
 
+def should_hold_overnight(quote_output: dict, pnl_pct: float) -> bool:
+    enabled = str(os.getenv("DT_HOLD_OVERNIGHT_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+    if not enabled:
+        return False
+    min_pnl = env_float("DT_HOLD_OVERNIGHT_MIN_PNL_PCT", 2.0)
+    min_day_rate = env_float("DT_HOLD_OVERNIGHT_MIN_DAY_RATE", 10.0)
+    try:
+        day_rate = float(quote_output.get("prdy_ctrt", "0") or 0)
+    except Exception:
+        day_rate = 0.0
+    return (pnl_pct >= min_pnl) and (day_rate >= min_day_rate)
+
+
 def available_cash_for_buy(balance: dict) -> int:
     o2 = (balance.get("output2") or [{}])[0]
     dnca = int(float(o2.get("dnca_tot_amt", "0") or 0))
@@ -496,11 +509,17 @@ def run_once(dry_run: bool, confirm: str | None):
                     save_state(state)
 
 
-        # force close 15:15~15:20 (continuous only)
-        if state["entered"] and dt.time(15, 15) <= t <= dt.time(15, 20) and is_continuous_session(t):
+        # force close in configured exit window (continuous only)
+        exit_start = env_time("DT_EXIT_START", "15:15")
+        exit_end = env_time("DT_EXIT_END", "15:20")
+        if state["entered"] and exit_start <= t <= exit_end and is_continuous_session(t):
             defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
             if defer_today:
                 log_event("eod_close_deferred_limit_up", {"symbol": state['symbol'], "entry_date": state.get("entry_date")}, notify=True)
+                return
+
+            if should_hold_overnight(d.get("output", {}), pnl):
+                log_event("eod_hold_overnight", {"symbol": state['symbol'], "pnl_pct": round(pnl, 2), "window": f"{exit_start.strftime('%H:%M')}-{exit_end.strftime('%H:%M')}"}, notify=True)
                 return
 
             prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
