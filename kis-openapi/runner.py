@@ -145,18 +145,29 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
     return True, warn
 
 
-def pick_top_symbol(client: KISClient) -> tuple[str, float, dict]:
+def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None) -> tuple[str, float, dict]:
     # dynamic shortlist from top-volume universe + tradeability filters
     # keep shortlist small for timely execution in cron windows
     symbols = top_volume_symbols(limit=20)
+    excludes = exclude_symbols or set()
     best = ("", -999.0, {})
     for s in symbols:
+        if s in excludes:
+            continue
         d = client.get_domestic_quote(s)
         o = d.get("output", {})
         ok, reason = is_tradeable_quote(o)
         if not ok:
             log_event("candidate_skip", {"symbol": s, "reason": reason})
             continue
+        # skip names already at upper limit when configured
+        if str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
+            cur = int(o.get("stck_prpr", "0") or 0)
+            prev_close = int(o.get("stck_sdpr", "0") or 0)
+            up = clamp_order_price_by_krx_limit(int(prev_close * 2), prev_close) if prev_close > 0 else 0
+            if up > 0 and cur >= up:
+                log_event("candidate_skip", {"symbol": s, "reason": "at_upper_limit"})
+                continue
         try:
             rate = float(o.get("prdy_ctrt", "0"))
             vol_rate = float(o.get("prdy_vrss_vol_rate", "0"))
@@ -346,7 +357,18 @@ def run_once(dry_run: bool, confirm: str | None):
             symbol = state.get("symbol")
             q = client.get_domestic_quote(symbol).get("output", {})
             score = 0.0
-            log_event("entry_add_on", {"symbol": symbol})
+            # If current holding is already at upper limit, do not wait on it; switch candidate.
+            prev_close_chk = int(q.get("stck_sdpr", "0") or 0)
+            cur_chk = int(q.get("stck_prpr", "0") or 0)
+            up_chk = clamp_order_price_by_krx_limit(int(prev_close_chk * 2), prev_close_chk) if prev_close_chk > 0 else 0
+            if up_chk > 0 and cur_chk >= up_chk and str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
+                log_event("entry_add_on_switch", {"from_symbol": symbol, "reason": "at_upper_limit"})
+                symbol, score, q = pick_top_symbol(client, exclude_symbols={state.get("symbol")})
+                if not symbol:
+                    log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
+                    return
+            else:
+                log_event("entry_add_on", {"symbol": symbol})
         else:
             symbol, score, q = pick_top_symbol(client)
             if not symbol:
