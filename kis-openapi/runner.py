@@ -398,6 +398,11 @@ def run_once(dry_run: bool, confirm: str | None):
             leg_price = clamp_order_price_by_krx_limit(leg_raw, leg_prev)
             up_limit_price = clamp_order_price_by_krx_limit(int(leg_prev * 2), leg_prev)
 
+            # don't chase stocks already at upper limit
+            if str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"} and leg_price >= up_limit_price:
+                log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "at_upper_limit", "price": leg_price})
+                continue
+
             remaining_cash = max(0, usable_cash - total_cost)
             leg_budget = int(usable_cash * w)
             leg_budget = min(leg_budget, remaining_cash)
