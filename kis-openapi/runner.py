@@ -284,6 +284,17 @@ def daily_loss_guard(state: dict) -> bool:
     return realized <= -max_loss_pct
 
 
+def available_cash_for_buy(balance: dict) -> int:
+    o2 = (balance.get("output2") or [{}])[0]
+    dnca = int(float(o2.get("dnca_tot_amt", "0") or 0))
+    thdt_buy = int(float(o2.get("thdt_buy_amt", "0") or 0))
+    # guard against orderable overestimation: subtract today's executed buys
+    remain = max(0, dnca - thdt_buy)
+    # small buffer for fees/tax/rounding
+    buffer_w = env_int("DT_CASH_BUFFER_W", 1000)
+    return max(0, remain - max(0, buffer_w))
+
+
 def run_once(dry_run: bool, confirm: str | None):
     cfg = load_config_from_env()
     client = KISClient(cfg)
@@ -335,7 +346,7 @@ def run_once(dry_run: bool, confirm: str | None):
         frac = position_fraction(regime)
 
         b = client.get_balance()
-        cash = int((b.get("output2") or [{}])[0].get("dnca_tot_amt", "0"))
+        cash = available_cash_for_buy(b)
         usable_cash = int(cash * frac)
         # hard cap per-symbol exposure (percent of available cash)
         max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
