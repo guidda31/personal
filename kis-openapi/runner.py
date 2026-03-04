@@ -98,12 +98,38 @@ def load_state() -> dict:
             "bot_managed": False,
             "entry_date": "",
             "defer_sell_next_day": False,
+            "positions": [],
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
 
 def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def sync_legacy_fields_from_positions(state: dict):
+    ps = state.get("positions") or []
+    if ps:
+        p = ps[0]
+        state.update({
+            "entered": True,
+            "symbol": p.get("symbol", ""),
+            "qty": int(p.get("qty", 0) or 0),
+            "avg_price": int(p.get("avg_price", 0) or 0),
+            "bot_managed": True,
+            "entry_date": p.get("entry_date", ""),
+            "defer_sell_next_day": bool(p.get("defer_sell_next_day", False)),
+        })
+    else:
+        state.update({
+            "entered": False,
+            "symbol": "",
+            "qty": 0,
+            "avg_price": 0,
+            "bot_managed": False,
+            "entry_date": "",
+            "defer_sell_next_day": False,
+        })
 
 
 def append_trade_history(side: str, symbol: str, qty: int, price: int, **extra):
@@ -339,6 +365,17 @@ def run_once(dry_run: bool, confirm: str | None):
         state["entry_date"] = ""
     if "defer_sell_next_day" not in state:
         state["defer_sell_next_day"] = False
+    if "positions" not in state:
+        state["positions"] = []
+    # migrate legacy single-position state into positions[]
+    if not state.get("positions") and state.get("entered") and state.get("bot_managed") and state.get("symbol"):
+        state["positions"] = [{
+            "symbol": state.get("symbol"),
+            "qty": int(state.get("qty", 0) or 0),
+            "avg_price": int(state.get("avg_price", 0) or 0),
+            "entry_date": state.get("entry_date") or today,
+            "defer_sell_next_day": bool(state.get("defer_sell_next_day", False)),
+        }]
 
     if state.get("date") != today:
         # Day rollover: keep open position context, reset daily counters only.
@@ -360,27 +397,11 @@ def run_once(dry_run: bool, confirm: str | None):
             return
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
-        if state.get("entered") and state.get("bot_managed") and state.get("symbol"):
-            symbol = state.get("symbol")
-            q = client.get_domestic_quote(symbol).get("output", {})
-            score = 0.0
-            # If current holding is already at upper limit, do not wait on it; switch candidate.
-            prev_close_chk = int(q.get("stck_sdpr", "0") or 0)
-            cur_chk = int(q.get("stck_prpr", "0") or 0)
-            up_chk = upper_limit_price(prev_close_chk) if prev_close_chk > 0 else 0
-            if up_chk > 0 and cur_chk >= up_chk and str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
-                log_event("entry_add_on_switch", {"from_symbol": symbol, "reason": "at_upper_limit"})
-                symbol, score, q = pick_top_symbol(client, exclude_symbols={state.get("symbol")})
-                if not symbol:
-                    log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
-                    return
-            else:
-                log_event("entry_add_on", {"symbol": symbol})
-        else:
-            symbol, score, q = pick_top_symbol(client)
-            if not symbol:
-                log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
-                return
+        held_symbols = {str(p.get("symbol", "")).strip() for p in (state.get("positions") or []) if p.get("symbol")}
+        symbol, score, q = pick_top_symbol(client, exclude_symbols=held_symbols)
+        if not symbol:
+            log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols)}, notify=True)
+            return
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
         prev_close = int(q.get("stck_sdpr", "0") or 0)
@@ -474,114 +495,127 @@ def run_once(dry_run: bool, confirm: str | None):
                 time.sleep(max(1, interval_sec))
 
         if total_qty > 0:
-            prev_qty = int(state.get("qty", 0) or 0) if state.get("entered") and state.get("bot_managed") and state.get("symbol") == symbol else 0
-            prev_avg = int(state.get("avg_price", 0) or 0) if prev_qty > 0 else 0
-            new_qty = prev_qty + total_qty
-            new_cost = prev_qty * prev_avg + total_cost
-            avg_price = int(round(new_cost / max(1, new_qty)))
-            state.update({
-                "entered": True,
-                "symbol": symbol,
-                "qty": new_qty,
-                "avg_price": avg_price,
-                "bot_managed": True,
-                "entry_date": state.get("entry_date") or today,
-                "defer_sell_next_day": bool(state.get("defer_sell_next_day") or bought_at_upper_limit),
-            })
+            positions = state.get("positions") or []
+            found = None
+            for p in positions:
+                if p.get("symbol") == symbol:
+                    found = p
+                    break
+            if found:
+                prev_qty = int(found.get("qty", 0) or 0)
+                prev_avg = int(found.get("avg_price", 0) or 0)
+                new_qty = prev_qty + total_qty
+                new_cost = prev_qty * prev_avg + total_cost
+                found["qty"] = new_qty
+                found["avg_price"] = int(round(new_cost / max(1, new_qty)))
+                found["defer_sell_next_day"] = bool(found.get("defer_sell_next_day", False) or bought_at_upper_limit)
+                found["entry_date"] = found.get("entry_date") or today
+            else:
+                positions.append({
+                    "symbol": symbol,
+                    "qty": int(total_qty),
+                    "avg_price": int(round(total_cost / max(1, total_qty))),
+                    "entry_date": today,
+                    "defer_sell_next_day": bool(bought_at_upper_limit),
+                })
+            state["positions"] = positions
             if bought_at_upper_limit:
                 log_event("sell_deferred_limit_up", {"symbol": symbol, "entry_date": today}, notify=True)
+            sync_legacy_fields_from_positions(state)
             save_state(state)
 
-    # 2) Risk/exit monitor
-    if state["entered"] and not state.get("bot_managed", False):
-        log_event("position_skip", {"reason": "non-bot position", "symbol": state.get("symbol", "")})
-        return
+    # 2) Risk/exit monitor (multi-position)
+    positions = state.get("positions") or []
+    updated_positions = []
+    exit_start = env_time("DT_EXIT_START", "15:15")
+    exit_end = env_time("DT_EXIT_END", "15:20")
 
-    if state["entered"]:
-        d = client.get_domestic_quote(state["symbol"])
+    for p in positions:
+        symbol = str(p.get("symbol", "")).strip()
+        qty = int(p.get("qty", 0) or 0)
+        avg = int(p.get("avg_price", 0) or 0)
+        if not symbol or qty <= 0 or avg <= 0:
+            continue
+
+        d = client.get_domestic_quote(symbol)
         cur = int(d.get("output", {}).get("stck_prpr", "0") or 0)
-        avg = int(state.get("avg_price", 0) or 0)
-        qty = int(state.get("qty", 0) or 0)
+        if cur <= 0:
+            updated_positions.append(p)
+            continue
 
-        if avg > 0 and cur > 0:
-            pnl = (cur - avg) / avg * 100
-            prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
-            sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
-            defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
-            log_event("monitor", {"symbol": state['symbol'], "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today})
+        pnl = (cur - avg) / avg * 100
+        prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
+        sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
+        defer_today = bool(p.get("defer_sell_next_day")) and p.get("entry_date") == today
+        log_event("monitor", {"symbol": symbol, "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today})
 
-            # stop loss -10%
-            if pnl <= -10.0:
-                if defer_today:
-                    log_event("stoploss_deferred_limit_up", {"symbol": state['symbol'], "pnl_pct": round(pnl, 2)}, notify=True)
-                elif not is_continuous_session(t):
-                    log_event("stoploss_wait", {"symbol": state['symbol'], "reason": "not continuous session"}, notify=True)
+        closed = False
+        # stop loss -10%
+        if pnl <= -10.0:
+            if defer_today:
+                log_event("stoploss_deferred_limit_up", {"symbol": symbol, "pnl_pct": round(pnl, 2)}, notify=True)
+            elif not is_continuous_session(t):
+                log_event("stoploss_wait", {"symbol": symbol, "reason": "not continuous session"}, notify=True)
+            else:
+                if dry_run:
+                    log_event("stoploss_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price}, notify=True)
+                    closed = True
                 else:
-                    if dry_run:
-                        log_event("stoploss_dry_run", {"symbol": state['symbol'], "qty": qty, "price": sell_price}, notify=True)
-                    else:
-                        if cfg.mode == "real" and confirm != "REAL_ORDER":
-                            raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                        res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
-                        log_event("stoploss_sell", {"result": res}, notify=True)
+                    if cfg.mode == "real" and confirm != "REAL_ORDER":
+                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                    log_event("stoploss_sell", {"symbol": symbol, "result": res}, notify=True)
+                    ok = str((res or {}).get("rt_cd", "")) == "0"
+                    if ok:
                         append_trade_history(
-                            "SELL",
-                            state["symbol"],
-                            qty,
-                            sell_price,
-                            reason="stoploss",
+                            "SELL", symbol, qty, sell_price, reason="stoploss",
                             order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
                         )
+                        closed = True
 
+                if closed:
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
                     if daily_loss_guard(state):
                         state["trading_disabled_today"] = True
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-                    state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False, "defer_sell_next_day": False})
-                    save_state(state)
-
-
-        # force close in configured exit window (continuous only)
-        exit_start = env_time("DT_EXIT_START", "15:15")
-        exit_end = env_time("DT_EXIT_END", "15:20")
-        if state["entered"] and exit_start <= t <= exit_end and is_continuous_session(t):
-            defer_today = bool(state.get("defer_sell_next_day")) and state.get("entry_date") == today
+        # force close in configured exit window
+        if (not closed) and exit_start <= t <= exit_end and is_continuous_session(t):
             if defer_today:
-                log_event("eod_close_deferred_limit_up", {"symbol": state['symbol'], "entry_date": state.get("entry_date")}, notify=True)
-                return
-
-            if should_hold_overnight(d.get("output", {}), pnl):
-                log_event("eod_hold_overnight", {"symbol": state['symbol'], "pnl_pct": round(pnl, 2), "window": f"{exit_start.strftime('%H:%M')}-{exit_end.strftime('%H:%M')}"}, notify=True)
-                return
-
-            prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
-            sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
-            if dry_run:
-                log_event("eod_close_dry_run", {"symbol": state['symbol'], "qty": qty, "price": sell_price}, notify=True)
+                log_event("eod_close_deferred_limit_up", {"symbol": symbol, "entry_date": p.get("entry_date")}, notify=True)
+            elif should_hold_overnight(d.get("output", {}), pnl):
+                log_event("eod_hold_overnight", {"symbol": symbol, "pnl_pct": round(pnl, 2), "window": f"{exit_start.strftime('%H:%M')}-{exit_end.strftime('%H:%M')}"}, notify=True)
             else:
-                if cfg.mode == "real" and confirm != "REAL_ORDER":
-                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                res = client.order_cash_sell(symbol=state["symbol"], qty=qty, price=sell_price, ord_dvsn="00")
-                log_event("eod_close_sell", {"result": res}, notify=True)
-                append_trade_history(
-                    "SELL",
-                    state["symbol"],
-                    qty,
-                    sell_price,
-                    reason="eod_close",
-                    order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
-                )
+                if dry_run:
+                    log_event("eod_close_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price}, notify=True)
+                    closed = True
+                else:
+                    if cfg.mode == "real" and confirm != "REAL_ORDER":
+                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                    log_event("eod_close_sell", {"symbol": symbol, "result": res}, notify=True)
+                    ok = str((res or {}).get("rt_cd", "")) == "0"
+                    if ok:
+                        append_trade_history(
+                            "SELL", symbol, qty, sell_price, reason="eod_close",
+                            order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                        )
+                        closed = True
 
-            trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
-            state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
-            if daily_loss_guard(state):
-                state["trading_disabled_today"] = True
-                log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
+                if closed:
+                    trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                    if daily_loss_guard(state):
+                        state["trading_disabled_today"] = True
+                        log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-            state.update({"entered": False, "qty": 0, "entry_legs_done": 0, "bot_managed": False, "defer_sell_next_day": False})
-            save_state(state)
+        if not closed:
+            updated_positions.append(p)
+
+    state["positions"] = updated_positions
+    sync_legacy_fields_from_positions(state)
+    save_state(state)
 
 
 def main():
