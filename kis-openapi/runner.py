@@ -312,16 +312,22 @@ def run_once(dry_run: bool, confirm: str | None):
     # 1) Entry window (env configurable, defaults to intraday)
     entry_start = env_time("DT_ENTRY_START", "09:01")
     entry_end = env_time("DT_ENTRY_END", "15:10")
-    if not state["entered"] and entry_start <= t <= entry_end and is_continuous_session(t):
+    if entry_start <= t <= entry_end and is_continuous_session(t):
         if daily_loss_guard(state) or state.get("trading_disabled_today"):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
             return
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
-        symbol, score, q = pick_top_symbol(client)
-        if not symbol:
-            log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
-            return
+        if state.get("entered") and state.get("bot_managed") and state.get("symbol"):
+            symbol = state.get("symbol")
+            q = client.get_domestic_quote(symbol).get("output", {})
+            score = 0.0
+            log_event("entry_add_on", {"symbol": symbol})
+        else:
+            symbol, score, q = pick_top_symbol(client)
+            if not symbol:
+                log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
+                return
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
         prev_close = int(q.get("stck_sdpr", "0") or 0)
@@ -377,6 +383,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "qty=0", "budget": leg_budget, "price": leg_price})
                 continue
 
+            executed_qty = leg_qty
             if dry_run:
                 log_event("buy_dry_run", {"symbol": symbol, "leg": i, "qty": leg_qty, "price": leg_price}, notify=True)
             else:
@@ -384,18 +391,22 @@ def run_once(dry_run: bool, confirm: str | None):
                     raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
                 res = client.order_cash_buy(symbol=symbol, qty=leg_qty, price=leg_price, ord_dvsn="00")
                 log_event("buy_submitted", {"symbol": symbol, "leg": i, "qty": leg_qty, "price": leg_price, "result": res}, notify=True)
-                append_trade_history(
-                    "BUY",
-                    symbol,
-                    leg_qty,
-                    leg_price,
-                    leg=i,
-                    is_limit_up_buy=bool(leg_price >= up_limit_price),
-                    order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
-                )
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if not ok:
+                    executed_qty = 0
+                else:
+                    append_trade_history(
+                        "BUY",
+                        symbol,
+                        leg_qty,
+                        leg_price,
+                        leg=i,
+                        is_limit_up_buy=bool(leg_price >= up_limit_price),
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
 
-            total_qty += leg_qty
-            total_cost += leg_qty * leg_price
+            total_qty += executed_qty
+            total_cost += executed_qty * leg_price
             if leg_price >= up_limit_price:
                 bought_at_upper_limit = True
             state["entry_legs_done"] = i
@@ -405,15 +416,19 @@ def run_once(dry_run: bool, confirm: str | None):
                 time.sleep(max(1, interval_sec))
 
         if total_qty > 0:
-            avg_price = int(round(total_cost / total_qty))
+            prev_qty = int(state.get("qty", 0) or 0) if state.get("entered") and state.get("bot_managed") and state.get("symbol") == symbol else 0
+            prev_avg = int(state.get("avg_price", 0) or 0) if prev_qty > 0 else 0
+            new_qty = prev_qty + total_qty
+            new_cost = prev_qty * prev_avg + total_cost
+            avg_price = int(round(new_cost / max(1, new_qty)))
             state.update({
                 "entered": True,
                 "symbol": symbol,
-                "qty": total_qty,
+                "qty": new_qty,
                 "avg_price": avg_price,
                 "bot_managed": True,
-                "entry_date": today,
-                "defer_sell_next_day": bool(bought_at_upper_limit),
+                "entry_date": state.get("entry_date") or today,
+                "defer_sell_next_day": bool(state.get("defer_sell_next_day") or bought_at_upper_limit),
             })
             if bought_at_upper_limit:
                 log_event("sell_deferred_limit_up", {"symbol": symbol, "entry_date": today}, notify=True)
