@@ -398,7 +398,8 @@ def run_once(dry_run: bool, confirm: str | None):
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
         held_symbols = {str(p.get("symbol", "")).strip() for p in (state.get("positions") or []) if p.get("symbol")}
-        symbol, score, q = pick_top_symbol(client, exclude_symbols=held_symbols)
+        prefer_div = str(os.getenv("DT_PREFER_DIVERSIFICATION", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        symbol, score, q = pick_top_symbol(client, exclude_symbols=held_symbols if prefer_div else set())
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols)}, notify=True)
             return
