@@ -164,7 +164,7 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None) 
         if str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
             cur = int(o.get("stck_prpr", "0") or 0)
             prev_close = int(o.get("stck_sdpr", "0") or 0)
-            up = clamp_order_price_by_krx_limit(int(prev_close * 2), prev_close) if prev_close > 0 else 0
+            up = upper_limit_price(prev_close) if prev_close > 0 else 0
             if up > 0 and cur >= up:
                 log_event("candidate_skip", {"symbol": s, "reason": "at_upper_limit"})
                 continue
@@ -215,6 +215,13 @@ def clamp_order_price_by_krx_limit(price: int, prev_close: int) -> int:
     hi = int(round(prev_close * 1.30))
     p = min(max(int(price), lo), hi)
     return round_to_tick(p)
+
+
+def upper_limit_price(prev_close: int) -> int:
+    if prev_close <= 0:
+        return 0
+    # Use floor-to-tick behavior to avoid false negatives around boundary prices.
+    return round_to_tick(int(prev_close * 1.30))
 
 
 def is_continuous_session(t: dt.time) -> bool:
@@ -360,7 +367,7 @@ def run_once(dry_run: bool, confirm: str | None):
             # If current holding is already at upper limit, do not wait on it; switch candidate.
             prev_close_chk = int(q.get("stck_sdpr", "0") or 0)
             cur_chk = int(q.get("stck_prpr", "0") or 0)
-            up_chk = clamp_order_price_by_krx_limit(int(prev_close_chk * 2), prev_close_chk) if prev_close_chk > 0 else 0
+            up_chk = upper_limit_price(prev_close_chk) if prev_close_chk > 0 else 0
             if up_chk > 0 and cur_chk >= up_chk and str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
                 log_event("entry_add_on_switch", {"from_symbol": symbol, "reason": "at_upper_limit"})
                 symbol, score, q = pick_top_symbol(client, exclude_symbols={state.get("symbol")})
@@ -418,7 +425,7 @@ def run_once(dry_run: bool, confirm: str | None):
             leg_raw = int(q_now.get("stck_prpr", "0") or raw_price)
             leg_prev = int(q_now.get("stck_sdpr", "0") or prev_close)
             leg_price = clamp_order_price_by_krx_limit(leg_raw, leg_prev)
-            up_limit_price = clamp_order_price_by_krx_limit(int(leg_prev * 2), leg_prev)
+            up_limit_price = upper_limit_price(leg_prev)
 
             # don't chase stocks already at upper limit
             if str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"} and leg_price >= up_limit_price:
