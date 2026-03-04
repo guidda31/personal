@@ -225,6 +225,16 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_time(name: str, default_hhmm: str) -> dt.time:
+    raw = os.getenv(name, default_hhmm).strip()
+    try:
+        hh, mm = raw.split(':', 1)
+        return dt.time(int(hh), int(mm))
+    except Exception:
+        hh, mm = default_hhmm.split(':', 1)
+        return dt.time(int(hh), int(mm))
+
+
 def parse_splits(s: str) -> list[float]:
     raw = [x.strip() for x in (s or "").split(",") if x.strip()]
     vals = []
@@ -299,13 +309,15 @@ def run_once(dry_run: bool, confirm: str | None):
             state["defer_sell_next_day"] = False
         save_state(state)
 
-    # 1) Entry window (09:01~10:00, continuous session only)
-    if not state["entered"] and dt.time(9, 1) <= t <= dt.time(10, 0) and is_continuous_session(t):
+    # 1) Entry window (env configurable, defaults to intraday)
+    entry_start = env_time("DT_ENTRY_START", "09:01")
+    entry_end = env_time("DT_ENTRY_END", "15:10")
+    if not state["entered"] and entry_start <= t <= entry_end and is_continuous_session(t):
         if daily_loss_guard(state) or state.get("trading_disabled_today"):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
             return
 
-        log_event("entry_scan_start", {"window": "09:01-10:00", "mode": cfg.mode})
+        log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
         symbol, score, q = pick_top_symbol(client)
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate"}, notify=True)
