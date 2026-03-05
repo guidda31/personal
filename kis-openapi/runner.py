@@ -173,17 +173,25 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
 
 def infer_theme(name: str) -> str:
     n = (name or "").lower()
-    if any(k in n for k in ["에너지", "석유", "가스", "oil", "energy"]):
+    if any(k in n for k in ["석유", "정유", "oil"]):
+        return "oil"
+    if any(k in n for k in ["가스", "lng", "lpg", "도시가스"]):
+        return "gas"
+    if any(k in n for k in ["에너지", "파워", "전력", "energy"]):
         return "energy"
-    if any(k in n for k in ["해운", "조선", "shipping", "marine"]):
+    if any(k in n for k in ["해운", "shipping", "marine", "물류"]):
         return "shipping"
-    if any(k in n for k in ["방산", "항공우주", "디펜", "defense"]):
+    if any(k in n for k in ["조선", "중공업", "ship"]):
+        return "shipbuilding"
+    if any(k in n for k in ["방산", "디펜", "defense"]):
         return "defense"
+    if any(k in n for k in ["항공우주", "우주", "aero", "space"]):
+        return "aerospace"
     if any(k in n for k in ["바이오", "제약", "bio", "pharma"]):
         return "bio"
     if any(k in n for k in ["반도체", "semicon", "테크", "전자"]):
         return "semicon"
-    if any(k in n for k in ["금융", "증권", "은행", "캐피탈"]):
+    if any(k in n for k in ["금융", "증권", "은행", "캐피탈", "보험"]):
         return "finance"
     return "general"
 
