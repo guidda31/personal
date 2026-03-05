@@ -45,7 +45,7 @@ def fetch_text(url: str, encoding: str = "euc-kr") -> str:
     return b.decode(encoding, "ignore")
 
 
-def top_volume_symbols(limit: int = 30) -> list[str]:
+def top_volume_symbols(limit: int = 30) -> list[dict]:
     out = []
     etf_kw = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "ETN", "레버리지", "인버스"]
     # basic KRX hygiene filters by name
@@ -62,7 +62,7 @@ def top_volume_symbols(limit: int = 30) -> list[str]:
                 continue
             if any(k.upper() in u for k in bad_name_kw):
                 continue
-            out.append(code)
+            out.append({"code": code, "name": name})
             if len(out) >= limit:
                 return out
     return out
@@ -171,14 +171,37 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
     return True, warn
 
 
-def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None) -> tuple[str, float, dict]:
+def infer_theme(name: str) -> str:
+    n = (name or "").lower()
+    if any(k in n for k in ["에너지", "석유", "가스", "oil", "energy"]):
+        return "energy"
+    if any(k in n for k in ["해운", "조선", "shipping", "marine"]):
+        return "shipping"
+    if any(k in n for k in ["방산", "항공우주", "디펜", "defense"]):
+        return "defense"
+    if any(k in n for k in ["바이오", "제약", "bio", "pharma"]):
+        return "bio"
+    if any(k in n for k in ["반도체", "semicon", "테크", "전자"]):
+        return "semicon"
+    if any(k in n for k in ["금융", "증권", "은행", "캐피탈"]):
+        return "finance"
+    return "general"
+
+
+def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, exclude_themes: set[str] | None = None) -> tuple[str, float, dict, str]:
     # dynamic shortlist from top-volume universe + tradeability filters
     # keep shortlist small for timely execution in cron windows
     symbols = top_volume_symbols(limit=20)
     excludes = exclude_symbols or set()
-    best = ("", -999.0, {})
-    for s in symbols:
+    ex_themes = exclude_themes or set()
+    best = ("", -999.0, {}, "general")
+    for item in symbols:
+        s = item.get("code")
+        nm = item.get("name", "")
         if s in excludes:
+            continue
+        theme = infer_theme(nm)
+        if theme in ex_themes:
             continue
         d = client.get_domestic_quote(s)
         o = d.get("output", {})
@@ -201,7 +224,7 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None) 
         except Exception:
             continue
         if score > best[1]:
-            best = (s, score, o)
+            best = (s, score, o, theme)
     return best
 
 
@@ -398,10 +421,16 @@ def run_once(dry_run: bool, confirm: str | None):
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
         held_symbols = {str(p.get("symbol", "")).strip() for p in (state.get("positions") or []) if p.get("symbol")}
+        held_themes = {str(p.get("theme", "general")) for p in (state.get("positions") or [])}
         prefer_div = str(os.getenv("DT_PREFER_DIVERSIFICATION", "1")).strip().lower() in {"1", "true", "yes", "y"}
-        symbol, score, q = pick_top_symbol(client, exclude_symbols=held_symbols if prefer_div else set())
+        avoid_same_theme = str(os.getenv("DT_AVOID_SAME_THEME", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        symbol, score, q, sel_theme = pick_top_symbol(
+            client,
+            exclude_symbols=held_symbols if prefer_div else set(),
+            exclude_themes=held_themes if avoid_same_theme else set(),
+        )
         if not symbol:
-            log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols)}, notify=True)
+            log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols), "held_themes": list(held_themes)}, notify=True)
             return
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
@@ -437,6 +466,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 "usable_cash": usable_cash,
                 "max_symbol_exposure_pct": max_symbol_exposure_pct,
                 "splits": splits,
+                "theme": sel_theme,
             },
             notify=True,
         )
@@ -511,6 +541,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 found["avg_price"] = int(round(new_cost / max(1, new_qty)))
                 found["defer_sell_next_day"] = bool(found.get("defer_sell_next_day", False) or bought_at_upper_limit)
                 found["entry_date"] = found.get("entry_date") or today
+                found["theme"] = found.get("theme") or sel_theme
             else:
                 positions.append({
                     "symbol": symbol,
@@ -518,6 +549,7 @@ def run_once(dry_run: bool, confirm: str | None):
                     "avg_price": int(round(total_cost / max(1, total_qty))),
                     "entry_date": today,
                     "defer_sell_next_day": bool(bought_at_upper_limit),
+                    "theme": sel_theme,
                 })
             state["positions"] = positions
             if bought_at_upper_limit:
