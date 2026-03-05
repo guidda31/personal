@@ -20,6 +20,7 @@ import json
 import os
 import re
 import time
+from functools import lru_cache
 from html import unescape
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -171,28 +172,28 @@ def is_tradeable_quote(o: dict) -> tuple[bool, str]:
     return True, warn
 
 
-def infer_theme(name: str) -> str:
+@lru_cache(maxsize=1)
+def load_sector_theme_db() -> dict:
+    try:
+        from sector_theme_db import SECTOR_THEME_DB
+        return SECTOR_THEME_DB
+    except Exception:
+        return {"by_symbol": {}, "name_rules": []}
+
+
+def infer_theme(symbol: str, name: str) -> str:
+    db = load_sector_theme_db()
+    by_symbol = db.get("by_symbol") or {}
+    if symbol in by_symbol:
+        return str(by_symbol.get(symbol) or "general")
+
     n = (name or "").lower()
-    if any(k in n for k in ["석유", "정유", "oil"]):
-        return "oil"
-    if any(k in n for k in ["가스", "lng", "lpg", "도시가스"]):
-        return "gas"
-    if any(k in n for k in ["에너지", "파워", "전력", "energy"]):
-        return "energy"
-    if any(k in n for k in ["해운", "shipping", "marine", "물류"]):
-        return "shipping"
-    if any(k in n for k in ["조선", "중공업", "ship"]):
-        return "shipbuilding"
-    if any(k in n for k in ["방산", "디펜", "defense"]):
-        return "defense"
-    if any(k in n for k in ["항공우주", "우주", "aero", "space"]):
-        return "aerospace"
-    if any(k in n for k in ["바이오", "제약", "bio", "pharma"]):
-        return "bio"
-    if any(k in n for k in ["반도체", "semicon", "테크", "전자"]):
-        return "semicon"
-    if any(k in n for k in ["금융", "증권", "은행", "캐피탈", "보험"]):
-        return "finance"
+    for rule in (db.get("name_rules") or []):
+        theme = str(rule.get("theme") or "general")
+        for kw in (rule.get("contains") or []):
+            if str(kw).lower() in n:
+                return theme
+
     return "general"
 
 
@@ -208,7 +209,7 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, 
         nm = item.get("name", "")
         if s in excludes:
             continue
-        theme = infer_theme(nm)
+        theme = infer_theme(s, nm)
         if theme in ex_themes:
             continue
         d = client.get_domestic_quote(s)
