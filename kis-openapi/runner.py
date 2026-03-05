@@ -373,6 +373,30 @@ def should_hold_overnight(quote_output: dict, pnl_pct: float) -> bool:
     return (pnl_pct >= min_pnl) and (day_rate >= min_day_rate)
 
 
+def should_delay_eod_close(quote_output: dict, pnl_pct: float, now_t: dt.time) -> tuple[bool, str]:
+    """In same-day liquidation policy, optionally delay sell from 15:15 toward close when momentum is strong."""
+    enabled = str(os.getenv("DT_EOD_SMART_EXIT_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+    if not enabled:
+        return False, "disabled"
+
+    force_time = env_time("DT_EOD_FORCE_CLOSE_TIME", "15:19")
+    if now_t >= force_time:
+        return False, "force_close_time"
+
+    try:
+        day_rate = float(quote_output.get("prdy_ctrt", "0") or 0)
+    except Exception:
+        day_rate = 0.0
+
+    strong_day_rate = env_float("DT_EOD_DELAY_MIN_DAY_RATE", 8.0)
+    strong_pnl = env_float("DT_EOD_DELAY_MIN_PNL_PCT", 1.0)
+
+    if day_rate >= strong_day_rate and pnl_pct >= strong_pnl:
+        return True, f"strong_momentum(day_rate={round(day_rate,2)},pnl={round(pnl_pct,2)})"
+
+    return False, "weak_or_neutral"
+
+
 def available_cash_for_buy(balance: dict) -> int:
     o2 = (balance.get("output2") or [{}])[0]
     dnca = int(float(o2.get("dnca_tot_amt", "0") or 0))
@@ -629,21 +653,25 @@ def run_once(dry_run: bool, confirm: str | None):
             elif should_hold_overnight(d.get("output", {}), pnl):
                 log_event("eod_hold_overnight", {"symbol": symbol, "pnl_pct": round(pnl, 2), "window": f"{exit_start.strftime('%H:%M')}-{exit_end.strftime('%H:%M')}"}, notify=True)
             else:
-                if dry_run:
-                    log_event("eod_close_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price}, notify=True)
-                    closed = True
+                delay, reason = should_delay_eod_close(d.get("output", {}), pnl, t)
+                if delay:
+                    log_event("eod_close_delay", {"symbol": symbol, "reason": reason, "pnl_pct": round(pnl, 2)})
                 else:
-                    if cfg.mode == "real" and confirm != "REAL_ORDER":
-                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
-                    log_event("eod_close_sell", {"symbol": symbol, "result": res}, notify=True)
-                    ok = str((res or {}).get("rt_cd", "")) == "0"
-                    if ok:
-                        append_trade_history(
-                            "SELL", symbol, qty, sell_price, reason="eod_close",
-                            order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
-                        )
+                    if dry_run:
+                        log_event("eod_close_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "reason": reason}, notify=True)
                         closed = True
+                    else:
+                        if cfg.mode == "real" and confirm != "REAL_ORDER":
+                            raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                        res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                        log_event("eod_close_sell", {"symbol": symbol, "result": res, "reason": reason}, notify=True)
+                        ok = str((res or {}).get("rt_cd", "")) == "0"
+                        if ok:
+                            append_trade_history(
+                                "SELL", symbol, qty, sell_price, reason="eod_close",
+                                order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                            )
+                            closed = True
 
                 if closed:
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
