@@ -5,7 +5,7 @@ from pathlib import Path
 from engine import (
     atr_14,
     get_daily_bars,
-    get_top_volume,
+    get_top_volume_with_diag,
     get_usdkrw,
     now_kst,
     percent,
@@ -15,14 +15,22 @@ from engine import (
 )
 
 
-def auto_candidates(total: int = 50) -> list[dict]:
+def auto_candidates(total: int = 50) -> tuple[list[dict], dict]:
     half = total // 2
-    raw = get_top_volume("KOSPI", 220) + get_top_volume("KOSDAQ", 220)
+    kospi_raw, kospi_diag = get_top_volume_with_diag("KOSPI", 220)
+    kosdaq_raw, kosdaq_diag = get_top_volume_with_diag("KOSDAQ", 220)
+    raw = kospi_raw + kosdaq_raw
     etf_kw = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "ETN", "레버리지", "인버스"]
     picks = [p for p in raw if not any(k.upper() in p["name"].upper() for k in etf_kw)]
     kospi = [p for p in picks if p["market"] == "KOSPI"][:half]
     kosdaq = [p for p in picks if p["market"] == "KOSDAQ"][: total - len(kospi)]
-    return (kospi + kosdaq)[:total]
+    diags = {
+        "KOSPI": kospi_diag,
+        "KOSDAQ": kosdaq_diag,
+        "raw_count": len(raw),
+        "filtered_count": len(picks),
+    }
+    return (kospi + kosdaq)[:total], diags
 
 
 def load_cfg() -> dict:
@@ -32,13 +40,23 @@ def load_cfg() -> dict:
     return json.loads(cfg_path.read_text(encoding="utf-8"))
 
 
+def _session_state() -> str:
+    h, m = map(int, now_kst().split()[1].split(":")[:2])
+    cur = h * 60 + m
+    if cur < 9 * 60:
+        return "premarket"
+    if cur <= 15 * 60 + 30:
+        return "regular"
+    return "aftermarket"
+
+
 def main() -> None:
     cfg = load_cfg()
     risk = cfg.get("risk_profile", "neutral")
     total = int(cfg.get("auto_count", 50))
 
     fx, fx_chg = get_usdkrw()
-    cands = auto_candidates(total)
+    cands, diags = auto_candidates(total)
 
     scored = []
     for c in cands:
@@ -70,6 +88,21 @@ def main() -> None:
     if fx is not None:
         print(f"USD/KRW: {fx:,.2f} ({fx_chg})")
     print()
+
+    if not cands:
+        print("[데이터 상태] 거래대금 후보 조회 실패")
+        print(f"- 세션: {_session_state()}")
+        for mk in ("KOSPI", "KOSDAQ"):
+            d = diags.get(mk, {})
+            print(f"- {mk}: code={d.get('code')} rows={d.get('rows', 0)}")
+        return
+
+    if not scored:
+        print("[데이터 상태] 후보는 있으나 점수 산출 실패")
+        print(f"- raw={diags.get('raw_count', 0)} filtered={diags.get('filtered_count', 0)}")
+        print("- 원인: 일봉 데이터 부족/조회 실패 가능")
+        return
+
     print("상위 10개 실행 후보 (확률 점수 순)")
 
     for i, s in enumerate(scored[:10], start=1):

@@ -36,9 +36,17 @@ def get_usdkrw() -> tuple[float | None, str | None]:
     return price, chg
 
 
-def get_top_volume(market: str, count: int) -> list[dict]:
+def get_top_volume_with_diag(market: str, count: int) -> tuple[list[dict], dict]:
     sosok = "0" if market == "KOSPI" else "1"
-    html = fetch_text(f"https://finance.naver.com/sise/sise_quant.naver?sosok={sosok}", encoding="euc-kr")
+    url = f"https://finance.naver.com/sise/sise_quant.naver?sosok={sosok}"
+    try:
+        html = fetch_text(url, encoding="euc-kr")
+    except Exception as e:
+        return [], {"market": market, "ok": False, "code": "FETCH_FAIL", "url": url, "error": str(e)}
+
+    if "sise_quant" not in html and "거래량" not in html:
+        return [], {"market": market, "ok": False, "code": "HTML_UNEXPECTED", "url": url}
+
     rows = []
     for tr in re.findall(r"<tr>(.*?)</tr>", html, re.S):
         if 'class="tltle"' not in tr:
@@ -60,7 +68,13 @@ def get_top_volume(market: str, count: int) -> list[dict]:
 
         rows.append({"name": name, "code": code, "market": market, "price": price, "volume": volume})
     rows.sort(key=lambda x: x["volume"], reverse=True)
-    return rows[:count]
+    code = "OK" if rows else "PARSE_EMPTY"
+    return rows[:count], {"market": market, "ok": bool(rows), "code": code, "url": url, "rows": len(rows)}
+
+
+def get_top_volume(market: str, count: int) -> list[dict]:
+    rows, _ = get_top_volume_with_diag(market, count)
+    return rows
 
 
 def get_daily_bars(code: str, pages: int = 8) -> list[DailyBar]:
