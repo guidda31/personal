@@ -229,9 +229,16 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, 
         try:
             rate = float(o.get("prdy_ctrt", "0"))
             vol_rate = float(o.get("prdy_vrss_vol_rate", "0"))
-            score = rate * 0.65 + (vol_rate / 100.0) * 0.35
         except Exception:
             continue
+
+        min_day_rate = env_float("DT_MIN_DAY_RATE", 1.0)
+        max_day_rate = env_float("DT_MAX_DAY_RATE", 24.0)
+        if rate < min_day_rate or rate > max_day_rate:
+            log_event("candidate_skip", {"symbol": s, "reason": f"day_rate_out_of_range:{round(rate,2)}"})
+            continue
+
+        score = rate * 0.65 + (vol_rate / 100.0) * 0.35
         if score > best[1]:
             best = (s, score, o, theme)
     return best
@@ -583,6 +590,8 @@ def run_once(dry_run: bool, confirm: str | None):
                     "entry_date": today,
                     "defer_sell_next_day": bool(bought_at_upper_limit),
                     "theme": sel_theme,
+                    "tp1_done": False,
+                    "peak_pnl_pct": 0.0,
                 })
             state["positions"] = positions
             if bought_at_upper_limit:
@@ -615,9 +624,70 @@ def run_once(dry_run: bool, confirm: str | None):
         defer_today = bool(p.get("defer_sell_next_day")) and p.get("entry_date") == today
         log_event("monitor", {"symbol": symbol, "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today})
 
+        # track best unrealized pnl for trailing exit
+        prev_peak = float(p.get("peak_pnl_pct", -999.0) or -999.0)
+        peak = max(prev_peak, pnl)
+        p["peak_pnl_pct"] = round(peak, 4)
+
         closed = False
+
+        # partial take-profit (phase 1)
+        tp1_enabled = str(os.getenv("DT_TP1_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        tp1_done = bool(p.get("tp1_done", False))
+        tp1_pct = env_float("DT_TP1_PCT", 2.0)
+        tp1_ratio = max(0.1, min(0.9, env_float("DT_TP1_SELL_RATIO", 0.5)))
+        if (not closed) and tp1_enabled and (not tp1_done) and pnl >= tp1_pct and is_continuous_session(t):
+            sell_qty = max(1, int(qty * tp1_ratio))
+            sell_qty = min(sell_qty, qty)
+            if dry_run:
+                log_event("tp1_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "pnl_pct": round(pnl, 2)}, notify=True)
+                p["tp1_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("tp1_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "pnl_pct": round(pnl, 2)}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history(
+                        "SELL", symbol, sell_qty, sell_price, reason="tp1",
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
+                    part_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    weight = sell_qty / max(1, qty)
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + (part_pnl_pct * weight)
+                    p["tp1_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    if qty <= 0:
+                        closed = True
+
+        # trailing profit protection (phase 2)
+        trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
+        if (not closed) and trail_enabled and bool(p.get("tp1_done", False)) and is_continuous_session(t):
+            pullback = peak - pnl
+            if pnl > 0 and pullback >= trail_gap:
+                if dry_run:
+                    log_event("trail_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "pnl_pct": round(pnl, 2), "peak_pnl_pct": round(peak, 2)}, notify=True)
+                    closed = True
+                else:
+                    if cfg.mode == "real" and confirm != "REAL_ORDER":
+                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                    log_event("trail_sell", {"symbol": symbol, "qty": qty, "result": res, "pnl_pct": round(pnl, 2), "peak_pnl_pct": round(peak, 2)}, notify=True)
+                    ok = str((res or {}).get("rt_cd", "")) == "0"
+                    if ok:
+                        append_trade_history(
+                            "SELL", symbol, qty, sell_price, reason="trail",
+                            order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                        )
+                        trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                        state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                        closed = True
+
         # stop loss -10%
-        if pnl <= -10.0:
+        if (not closed) and pnl <= -10.0:
             if defer_today:
                 log_event("stoploss_deferred_limit_up", {"symbol": symbol, "pnl_pct": round(pnl, 2)}, notify=True)
             elif not is_continuous_session(t):
