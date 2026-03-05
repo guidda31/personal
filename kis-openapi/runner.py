@@ -392,7 +392,7 @@ def run_once(dry_run: bool, confirm: str | None):
     entry_start = env_time("DT_ENTRY_START", "09:01")
     entry_end = env_time("DT_ENTRY_END", "15:10")
     if entry_start <= t <= entry_end and is_continuous_session(t):
-        if daily_loss_guard(state) or state.get("trading_disabled_today"):
+        if daily_loss_guard(state):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
             return
 
@@ -578,7 +578,7 @@ def run_once(dry_run: bool, confirm: str | None):
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
                     if daily_loss_guard(state):
-                        state["trading_disabled_today"] = True
+                        state["trading_disabled_today"] = False
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
         # force close in configured exit window
@@ -608,7 +608,7 @@ def run_once(dry_run: bool, confirm: str | None):
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
                     if daily_loss_guard(state):
-                        state["trading_disabled_today"] = True
+                        state["trading_disabled_today"] = False
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
         if not closed:
