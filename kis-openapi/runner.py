@@ -305,9 +305,14 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, 
         if not ok:
             log_event("candidate_skip", {"symbol": s, "reason": reason})
             continue
+        cur = int(o.get("stck_prpr", "0") or 0)
+        min_price = env_int("DT_MIN_STOCK_PRICE", 5000)
+        if cur < max(1, min_price):
+            log_event("candidate_skip", {"symbol": s, "reason": f"price_below_min:{cur}"})
+            continue
+
         # skip names already at upper limit when configured
         if str(os.getenv("DT_SKIP_UPPER_LIMIT_BUY", "1")).strip().lower() in {"1", "true", "yes", "y"}:
-            cur = int(o.get("stck_prpr", "0") or 0)
             prev_close = int(o.get("stck_sdpr", "0") or 0)
             up = upper_limit_price(prev_close) if prev_close > 0 else 0
             if up > 0 and cur >= up:
@@ -577,6 +582,15 @@ def run_once(dry_run: bool, confirm: str | None):
         max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
         symbol_cap_cash = int(cash * (max_symbol_exposure_pct / 100.0))
         usable_cash = min(usable_cash, symbol_cap_cash)
+
+        min_orderable_cash = env_int("DT_MIN_ORDERABLE_CASH", 200000)
+        if usable_cash < max(1000, min_orderable_cash):
+            log_event(
+                "entry_skip",
+                {"reason": "insufficient_usable_cash", "cash": cash, "usable_cash": usable_cash, "min_orderable_cash": min_orderable_cash},
+                notify=True,
+            )
+            return
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
         interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
