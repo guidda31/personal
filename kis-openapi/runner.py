@@ -148,6 +148,93 @@ def append_trade_history(side: str, symbol: str, qty: int, price: int, **extra):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def load_bot_open_qty_from_trades() -> dict[str, int]:
+    net: dict[str, int] = {}
+    if not TRADE_LOG_FILE.exists():
+        return net
+    try:
+        with TRADE_LOG_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                sym = str(row.get("symbol", "")).strip()
+                side = str(row.get("side", "")).strip().upper()
+                qty = int(row.get("qty", 0) or 0)
+                if not sym or qty <= 0:
+                    continue
+                if side == "BUY":
+                    net[sym] = net.get(sym, 0) + qty
+                elif side == "SELL":
+                    net[sym] = net.get(sym, 0) - qty
+    except Exception:
+        return {}
+    return {k: max(0, v) for k, v in net.items() if v > 0}
+
+
+def reconcile_positions_with_balance(client: KISClient, state: dict, today: str) -> bool:
+    """Rebuild bot-managed positions from (trade history open qty ∩ live holdings)."""
+    open_qty = load_bot_open_qty_from_trades()
+    if not open_qty:
+        if state.get("positions"):
+            state["positions"] = []
+            sync_legacy_fields_from_positions(state)
+            return True
+        return False
+
+    bal = client.get_balance()
+    holdings = {}
+    for r in (bal.get("output1") or []):
+        sym = str(r.get("pdno", "")).strip()
+        if not sym:
+            continue
+        try:
+            qty = int(float(r.get("hldg_qty") or 0))
+        except Exception:
+            qty = 0
+        if qty <= 0:
+            continue
+        try:
+            avg = int(round(float(r.get("pchs_avg_pric") or 0)))
+        except Exception:
+            avg = 0
+        holdings[sym] = {"qty": qty, "avg": avg}
+
+    prev_by_symbol = {str(p.get("symbol", "")).strip(): p for p in (state.get("positions") or []) if p.get("symbol")}
+    rebuilt = []
+    for sym, oq in open_qty.items():
+        h = holdings.get(sym)
+        if not h:
+            continue
+        qty = min(int(h.get("qty", 0)), int(oq))
+        if qty <= 0:
+            continue
+        prev = prev_by_symbol.get(sym, {})
+        rebuilt.append({
+            "symbol": sym,
+            "qty": qty,
+            "avg_price": int(h.get("avg", 0) or 0),
+            "entry_date": prev.get("entry_date") or today,
+            "defer_sell_next_day": bool(prev.get("defer_sell_next_day", False)),
+            "theme": prev.get("theme") or "general",
+            "tp1_done": bool(prev.get("tp1_done", False)),
+            "peak_pnl_pct": float(prev.get("peak_pnl_pct", 0.0) or 0.0),
+        })
+
+    old = state.get("positions") or []
+    old_set = {(p.get("symbol"), int(p.get("qty", 0) or 0)) for p in old}
+    new_set = {(p.get("symbol"), int(p.get("qty", 0) or 0)) for p in rebuilt}
+    if old_set != new_set:
+        state["positions"] = rebuilt
+        sync_legacy_fields_from_positions(state)
+        return True
+    return False
+
+
 def is_tradeable_quote(o: dict) -> tuple[bool, str]:
     # KIS fields may vary by account/product; use defensive checks
     warn = ""
@@ -449,6 +536,11 @@ def run_once(dry_run: bool, confirm: str | None):
         if state.get("defer_sell_next_day") and state.get("entry_date") != today:
             # Next day reached -> allow sell from today.
             state["defer_sell_next_day"] = False
+        save_state(state)
+
+    # Reconcile bot-managed positions with live balance to avoid missing EOD liquidation.
+    if reconcile_positions_with_balance(client, state, today):
+        log_event("state_reconciled", {"positions": state.get("positions", [])}, notify=True)
         save_state(state)
 
     # 1) Entry window (env configurable, defaults to intraday)
