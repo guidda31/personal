@@ -100,6 +100,7 @@ def load_state() -> dict:
             "entry_date": "",
             "defer_sell_next_day": False,
             "positions": [],
+            "consecutive_stoplosses": 0,
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
@@ -522,6 +523,8 @@ def run_once(dry_run: bool, confirm: str | None):
         state["defer_sell_next_day"] = False
     if "positions" not in state:
         state["positions"] = []
+    if "consecutive_stoplosses" not in state:
+        state["consecutive_stoplosses"] = 0
     # migrate legacy single-position state into positions[]
     if not state.get("positions") and state.get("entered") and state.get("bot_managed") and state.get("symbol"):
         state["positions"] = [{
@@ -578,9 +581,13 @@ def run_once(dry_run: bool, confirm: str | None):
         b = client.get_balance()
         cash = available_cash_for_buy(b)
         usable_cash = int(cash * frac)
+        # consecutive stoploss protection: after 2+ stoplosses, cut sizing by 50%
+        loss_streak = int(state.get("consecutive_stoplosses", 0) or 0)
+        size_multiplier = 0.5 if loss_streak >= 2 else 1.0
+        usable_cash = int(usable_cash * size_multiplier)
         # hard cap per-symbol exposure (percent of available cash)
         max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
-        symbol_cap_cash = int(cash * (max_symbol_exposure_pct / 100.0))
+        symbol_cap_cash = int(cash * (max_symbol_exposure_pct / 100.0) * size_multiplier)
         usable_cash = min(usable_cash, symbol_cap_cash)
 
         min_orderable_cash = env_int("DT_MIN_ORDERABLE_CASH", 200000)
@@ -611,6 +618,8 @@ def run_once(dry_run: bool, confirm: str | None):
                 "cash": cash,
                 "usable_cash": usable_cash,
                 "max_symbol_exposure_pct": max_symbol_exposure_pct,
+                "loss_streak": loss_streak,
+                "size_multiplier": size_multiplier,
                 "splits": splits,
                 "theme": sel_theme,
             },
@@ -762,6 +771,8 @@ def run_once(dry_run: bool, confirm: str | None):
                     part_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     weight = sell_qty / max(1, qty)
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + (part_pnl_pct * weight)
+                    if part_pnl_pct > 0:
+                        state["consecutive_stoplosses"] = 0
                     p["tp1_done"] = True
                     p["qty"] = max(0, qty - sell_qty)
                     qty = int(p["qty"])
@@ -790,6 +801,8 @@ def run_once(dry_run: bool, confirm: str | None):
                         )
                         trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                         state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                        if trade_pnl_pct > 0:
+                            state["consecutive_stoplosses"] = 0
                         closed = True
 
         # stop loss -10%
@@ -813,6 +826,7 @@ def run_once(dry_run: bool, confirm: str | None):
                             "SELL", symbol, qty, sell_price, reason="stoploss",
                             order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
                         )
+                        state["consecutive_stoplosses"] = int(state.get("consecutive_stoplosses", 0) or 0) + 1
                         closed = True
 
                 if closed:
@@ -852,6 +866,8 @@ def run_once(dry_run: bool, confirm: str | None):
                 if closed:
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
                     state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                    if trade_pnl_pct > 0:
+                        state["consecutive_stoplosses"] = 0
                     if daily_loss_guard(state):
                         state["trading_disabled_today"] = False
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
