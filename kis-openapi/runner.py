@@ -603,14 +603,13 @@ def run_once(dry_run: bool, confirm: str | None):
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
         interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
 
-        # If selected symbol is too expensive to buy even 1 share in any split leg,
+        # If selected symbol is too expensive to buy even 1 share with total usable cash,
         # fallback to next candidates so affordable symbols can be bought.
-        max_leg_budget = int(usable_cash * max(splits)) if splits else usable_cash
         fallback_try = 0
-        while symbol and raw_price > max(1, max_leg_budget) and fallback_try < 8:
+        while symbol and raw_price > max(1, usable_cash) and fallback_try < 8:
             fallback_try += 1
             excluded_symbols.add(symbol)
-            log_event("candidate_skip", {"symbol": symbol, "reason": f"price_over_budget:{raw_price}>{max_leg_budget}"})
+            log_event("candidate_skip", {"symbol": symbol, "reason": f"price_over_usable_cash:{raw_price}>{usable_cash}"})
             ns, nscore, nq, ntheme = pick_top_symbol(
                 client,
                 exclude_symbols=excluded_symbols,
@@ -626,7 +625,7 @@ def run_once(dry_run: bool, confirm: str | None):
             frac = position_fraction(regime)
 
         if not symbol:
-            log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash, "max_leg_budget": max_leg_budget}, notify=True)
+            log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash}, notify=True)
             return
 
         total_qty = 0
@@ -653,6 +652,7 @@ def run_once(dry_run: bool, confirm: str | None):
             notify=True,
         )
 
+        carry_budget = 0
         for i, w in enumerate(splits, start=1):
             # refresh quote each leg
             q_now = client.get_domestic_quote(symbol).get("output", {})
@@ -667,12 +667,16 @@ def run_once(dry_run: bool, confirm: str | None):
                 continue
 
             remaining_cash = max(0, usable_cash - total_cost)
-            leg_budget = int(usable_cash * w)
-            leg_budget = min(leg_budget, remaining_cash)
+            base_leg_budget = int(usable_cash * w)
+            leg_budget = min(base_leg_budget + carry_budget, remaining_cash)
+            # last leg uses all remaining budget so expensive names can still get at least 1 share
+            if i == len(splits):
+                leg_budget = remaining_cash
             leg_qty = calc_qty(leg_budget, leg_price)
 
             if leg_qty <= 0:
-                log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "qty=0", "budget": leg_budget, "price": leg_price})
+                carry_budget = min(remaining_cash, carry_budget + base_leg_budget)
+                log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "qty=0", "budget": leg_budget, "price": leg_price, "carry_budget": carry_budget})
                 continue
 
             executed_qty = leg_qty
@@ -699,6 +703,7 @@ def run_once(dry_run: bool, confirm: str | None):
 
             total_qty += executed_qty
             total_cost += executed_qty * leg_price
+            carry_budget = 0
             if leg_price >= up_limit_price:
                 bought_at_upper_limit = True
             state["entry_legs_done"] = i
