@@ -36,6 +36,7 @@ from notifier import send_telegram
 STATE_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_state.json")
 TRADE_LOG_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.daytrade_trades.jsonl")
 ENTRY_SKIP_NOTIFY_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.entry_skip_notify_state.json")
+NOTIFY_AGG_FILE = Path("/home/guidda/.openclaw/workspace/kis-openapi/.notify_agg_state.json")
 
 UA = "Mozilla/5.0"
 
@@ -74,48 +75,53 @@ def now_kst() -> dt.datetime:
     return dt.datetime.now()
 
 
-def _load_entry_skip_notify_state() -> dict:
-    if not ENTRY_SKIP_NOTIFY_FILE.exists():
-        return {"window_start": 0, "counts": {}, "last_payload": {}}
+def _load_notify_agg_state() -> dict:
+    if not NOTIFY_AGG_FILE.exists():
+        return {"window_start": 0, "kind_counts": {}, "highlights": []}
     try:
-        return json.loads(ENTRY_SKIP_NOTIFY_FILE.read_text(encoding="utf-8"))
+        return json.loads(NOTIFY_AGG_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"window_start": 0, "counts": {}, "last_payload": {}}
+        return {"window_start": 0, "kind_counts": {}, "highlights": []}
 
 
-def _save_entry_skip_notify_state(state: dict):
-    ENTRY_SKIP_NOTIFY_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+def _save_notify_agg_state(state: dict):
+    NOTIFY_AGG_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _notify_entry_skip_hourly(payload: dict):
+def _notify_hourly(kind: str, payload: dict):
     now_ts = int(time.time())
-    state = _load_entry_skip_notify_state()
+    state = _load_notify_agg_state()
     window_start = int(state.get("window_start", 0) or 0)
-    counts = state.get("counts") or {}
-
     if window_start <= 0:
         window_start = now_ts
 
-    reason = str((payload or {}).get("reason", "unknown"))
-    counts[reason] = int(counts.get(reason, 0) or 0) + 1
-    state["counts"] = counts
-    state["last_payload"] = payload or {}
+    kind_counts = state.get("kind_counts") or {}
+    kind_counts[kind] = int(kind_counts.get(kind, 0) or 0) + 1
+    state["kind_counts"] = kind_counts
 
-    # send aggregated summary at most once per hour
+    highlights = state.get("highlights") or []
+    if kind in {"buy_submitted", "stoploss_sell", "tp1_sell", "trail_sell", "eod_close_sell", "daily_stop_triggered", "entry_skip"}:
+        highlights.append({"kind": kind, "payload": payload or {}, "ts": now_kst().strftime("%H:%M:%S")})
+    state["highlights"] = highlights[-20:]
+
     if now_ts - window_start >= 3600:
-        lines = [f"- {k}: {v}회" for k, v in sorted(counts.items(), key=lambda kv: kv[0])]
+        lines = [f"- {k}: {v}회" for k, v in sorted(kind_counts.items(), key=lambda kv: kv[0])]
         msg = (
-            "[KIS-AUTO] entry_skip (1시간 요약)\n"
+            "[KIS-AUTO] 1시간 요약\n"
             f"기간: {dt.datetime.fromtimestamp(window_start).strftime('%H:%M')}~{dt.datetime.fromtimestamp(now_ts).strftime('%H:%M')}\n"
-            f"건수: {sum(counts.values())}회\n"
+            f"알림 이벤트: {sum(kind_counts.values())}회\n"
             + "\n".join(lines)
         )
+        if highlights:
+            msg += "\n\n주요 로그(최근):"
+            for h in highlights[-5:]:
+                msg += f"\n- {h.get('ts')} {h.get('kind')}: {json.dumps(h.get('payload', {}), ensure_ascii=False)}"
         send_telegram(msg)
-        state = {"window_start": now_ts, "counts": {}, "last_payload": {}}
+        state = {"window_start": now_ts, "kind_counts": {}, "highlights": []}
     else:
         state["window_start"] = window_start
 
-    _save_entry_skip_notify_state(state)
+    _save_notify_agg_state(state)
 
 
 def log_event(kind: str, payload: dict, notify: bool = False):
@@ -127,10 +133,7 @@ def log_event(kind: str, payload: dict, notify: bool = False):
     line = json.dumps(row, ensure_ascii=False)
     print(line)
     if notify:
-        if kind == "entry_skip":
-            _notify_entry_skip_hourly(payload)
-        else:
-            send_telegram(f"[KIS-AUTO] {kind}\n{json.dumps(payload, ensure_ascii=False)}")
+        _notify_hourly(kind, payload)
 
 
 def load_state() -> dict:
