@@ -499,11 +499,23 @@ def should_delay_eod_close(quote_output: dict, pnl_pct: float, now_t: dt.time) -
 
 def available_cash_for_buy(balance: dict) -> int:
     o2 = (balance.get("output2") or [{}])[0]
+
+    # Prefer explicit orderable-cash fields when present.
+    # (field names can vary by TR/account type)
+    for k in ("ord_psbl_cash", "ord_psbl_amt", "prvs_rcdl_excc_amt"):
+        v = o2.get(k)
+        if v is not None and str(v).strip() != "":
+            try:
+                amt = int(float(v))
+                buffer_w = env_int("DT_CASH_BUFFER_W", 1000)
+                return max(0, amt - max(0, buffer_w))
+            except Exception:
+                pass
+
+    # Fallback: derive from deposit and today's buys
     dnca = int(float(o2.get("dnca_tot_amt", "0") or 0))
     thdt_buy = int(float(o2.get("thdt_buy_amt", "0") or 0))
-    # guard against orderable overestimation: subtract today's executed buys
     remain = max(0, dnca - thdt_buy)
-    # small buffer for fees/tax/rounding
     buffer_w = env_int("DT_CASH_BUFFER_W", 1000)
     return max(0, remain - max(0, buffer_w))
 
