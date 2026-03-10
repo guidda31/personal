@@ -666,7 +666,10 @@ def run_once(dry_run: bool, confirm: str | None):
                 log_event("buy_leg_skip", {"symbol": symbol, "leg": i, "reason": "at_upper_limit", "price": leg_price})
                 continue
 
-            remaining_cash = max(0, usable_cash - total_cost)
+            # refresh orderable cash every leg to track latest balance
+            bal_now = client.get_balance()
+            live_cash = available_cash_for_buy(bal_now)
+            remaining_cash = min(max(0, usable_cash - total_cost), max(0, live_cash))
             base_leg_budget = int(usable_cash * w)
             leg_budget = min(base_leg_budget + carry_budget, remaining_cash)
             # last leg uses all remaining budget so expensive names can still get at least 1 share
