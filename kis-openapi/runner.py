@@ -333,12 +333,18 @@ def infer_theme(symbol: str, name: str) -> str:
     return "general"
 
 
-def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, exclude_themes: set[str] | None = None) -> tuple[str, float, dict, str]:
+def pick_top_symbol(
+    client: KISClient,
+    exclude_symbols: set[str] | None = None,
+    exclude_themes: set[str] | None = None,
+    allow_symbols: set[str] | None = None,
+) -> tuple[str, float, dict, str]:
     # dynamic shortlist from top-volume universe + tradeability filters
     # keep shortlist small for timely execution in cron windows
     symbols = top_volume_symbols(limit=20)
     excludes = exclude_symbols or set()
     ex_themes = exclude_themes or set()
+    allow_syms = allow_symbols or set()
     best = ("", -999.0, {}, "general")
     for item in symbols:
         s = item.get("code")
@@ -346,7 +352,7 @@ def pick_top_symbol(client: KISClient, exclude_symbols: set[str] | None = None, 
         if s in excludes:
             continue
         theme = infer_theme(s, nm)
-        if theme in ex_themes:
+        if (s not in allow_syms) and (theme in ex_themes):
             continue
         d = client.get_domestic_quote(s)
         o = d.get("output", {})
@@ -624,11 +630,13 @@ def run_once(dry_run: bool, confirm: str | None):
         held_themes = {str(p.get("theme", "general")) for p in (state.get("positions") or [])}
         prefer_div = str(os.getenv("DT_PREFER_DIVERSIFICATION", "1")).strip().lower() in {"1", "true", "yes", "y"}
         avoid_same_theme = str(os.getenv("DT_AVOID_SAME_THEME", "1")).strip().lower() in {"1", "true", "yes", "y"}
-        excluded_symbols = set(held_symbols if prefer_div else set())
+        allow_add_on = str(os.getenv("DT_ALLOW_ADD_ON_EXISTING", "0")).strip().lower() in {"1", "true", "yes", "y"}
+        excluded_symbols = set(held_symbols if (prefer_div and not allow_add_on) else set())
         symbol, score, q, sel_theme = pick_top_symbol(
             client,
             exclude_symbols=excluded_symbols,
             exclude_themes=held_themes if avoid_same_theme else set(),
+            allow_symbols=held_symbols if allow_add_on else set(),
         )
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols), "held_themes": list(held_themes)}, notify=True)
@@ -674,6 +682,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 client,
                 exclude_symbols=excluded_symbols,
                 exclude_themes=held_themes if avoid_same_theme else set(),
+                allow_symbols=held_symbols if allow_add_on else set(),
             )
             if not ns:
                 symbol = ""
