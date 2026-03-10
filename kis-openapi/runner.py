@@ -564,9 +564,10 @@ def run_once(dry_run: bool, confirm: str | None):
         held_themes = {str(p.get("theme", "general")) for p in (state.get("positions") or [])}
         prefer_div = str(os.getenv("DT_PREFER_DIVERSIFICATION", "1")).strip().lower() in {"1", "true", "yes", "y"}
         avoid_same_theme = str(os.getenv("DT_AVOID_SAME_THEME", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        excluded_symbols = set(held_symbols if prefer_div else set())
         symbol, score, q, sel_theme = pick_top_symbol(
             client,
-            exclude_symbols=held_symbols if prefer_div else set(),
+            exclude_symbols=excluded_symbols,
             exclude_themes=held_themes if avoid_same_theme else set(),
         )
         if not symbol:
@@ -601,6 +602,32 @@ def run_once(dry_run: bool, confirm: str | None):
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
         interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
+
+        # If selected symbol is too expensive to buy even 1 share in any split leg,
+        # fallback to next candidates so affordable symbols can be bought.
+        max_leg_budget = int(usable_cash * max(splits)) if splits else usable_cash
+        fallback_try = 0
+        while symbol and raw_price > max(1, max_leg_budget) and fallback_try < 8:
+            fallback_try += 1
+            excluded_symbols.add(symbol)
+            log_event("candidate_skip", {"symbol": symbol, "reason": f"price_over_budget:{raw_price}>{max_leg_budget}"})
+            ns, nscore, nq, ntheme = pick_top_symbol(
+                client,
+                exclude_symbols=excluded_symbols,
+                exclude_themes=held_themes if avoid_same_theme else set(),
+            )
+            if not ns:
+                symbol = ""
+                break
+            symbol, score, q, sel_theme = ns, nscore, nq, ntheme
+            raw_price = int(q.get("stck_prpr", "0") or 0)
+            prev_close = int(q.get("stck_sdpr", "0") or 0)
+            regime = volatility_regime_from_quote(q)
+            frac = position_fraction(regime)
+
+        if not symbol:
+            log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash, "max_leg_budget": max_leg_budget}, notify=True)
+            return
 
         total_qty = 0
         total_cost = 0
