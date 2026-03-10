@@ -826,6 +826,7 @@ def run_once(dry_run: bool, confirm: str | None):
     updated_positions = []
     exit_start = env_time("DT_EXIT_START", "15:15")
     exit_end = env_time("DT_EXIT_END", "15:20")
+    exit_retry_end = env_time("DT_EOD_RETRY_END", "15:30")
 
     for p in positions:
         symbol = str(p.get("symbol", "")).strip()
@@ -969,6 +970,38 @@ def run_once(dry_run: bool, confirm: str | None):
                                 order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
                             )
                             closed = True
+
+                if closed:
+                    trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                    if trade_pnl_pct > 0:
+                        state["consecutive_stoplosses"] = 0
+                    if daily_loss_guard(state):
+                        state["trading_disabled_today"] = False
+                        log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
+
+        # retry liquidation after exit window (safety net)
+        if (not closed) and (t > exit_end) and (t <= exit_retry_end) and is_continuous_session(t):
+            if defer_today:
+                log_event("eod_retry_deferred_limit_up", {"symbol": symbol, "entry_date": p.get("entry_date")}, notify=True)
+            elif should_hold_overnight(d.get("output", {}), pnl):
+                log_event("eod_retry_hold_overnight", {"symbol": symbol, "pnl_pct": round(pnl, 2), "window": f"{exit_end.strftime('%H:%M')}-{exit_retry_end.strftime('%H:%M')}"}, notify=True)
+            else:
+                if dry_run:
+                    log_event("eod_retry_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price}, notify=True)
+                    closed = True
+                else:
+                    if cfg.mode == "real" and confirm != "REAL_ORDER":
+                        raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                    log_event("eod_retry_sell", {"symbol": symbol, "result": res}, notify=True)
+                    ok = str((res or {}).get("rt_cd", "")) == "0"
+                    if ok:
+                        append_trade_history(
+                            "SELL", symbol, qty, sell_price, reason="eod_retry",
+                            order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                        )
+                        closed = True
 
                 if closed:
                     trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
