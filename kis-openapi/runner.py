@@ -577,6 +577,64 @@ def available_cash_for_buy(balance: dict) -> int:
     return max(0, remain - max(0, buffer_w))
 
 
+def quick_stoploss_check(client: KISClient, state: dict, dry_run: bool, confirm: str | None, cfg) -> bool:
+    """Run stoploss for open positions even when entry path exits early."""
+    t = now_kst().time()
+    if not is_continuous_session(t):
+        return False
+
+    changed = False
+    updated_positions = []
+    for p in (state.get("positions") or []):
+        symbol = str(p.get("symbol", "")).strip()
+        qty = int(p.get("qty", 0) or 0)
+        avg = int(p.get("avg_price", 0) or 0)
+        if not symbol or qty <= 0 or avg <= 0:
+            continue
+
+        d = client.get_domestic_quote(symbol)
+        cur = int(d.get("output", {}).get("stck_prpr", "0") or 0)
+        if cur <= 0:
+            updated_positions.append(p)
+            continue
+
+        pnl = (cur - avg) / avg * 100
+        stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
+        if pnl > -stoploss_pct:
+            updated_positions.append(p)
+            continue
+
+        prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
+        sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
+
+        if dry_run:
+            log_event("stoploss_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+            changed = True
+            continue
+
+        if cfg.mode == "real" and confirm != "REAL_ORDER":
+            raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+
+        res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+        log_event("stoploss_sell", {"symbol": symbol, "result": res, "source": "entry_early_exit"}, notify=True)
+        ok = str((res or {}).get("rt_cd", "")) == "0"
+        if ok:
+            append_trade_history(
+                "SELL", symbol, qty, sell_price, reason="stoploss",
+                order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+            )
+            state["consecutive_stoplosses"] = int(state.get("consecutive_stoplosses", 0) or 0) + 1
+            changed = True
+        else:
+            updated_positions.append(p)
+
+    if changed:
+        state["positions"] = updated_positions
+        sync_legacy_fields_from_positions(state)
+        save_state(state)
+    return changed
+
+
 def run_once(dry_run: bool, confirm: str | None):
     cfg = load_config_from_env()
     client = KISClient(cfg)
@@ -626,6 +684,7 @@ def run_once(dry_run: bool, confirm: str | None):
     if entry_start <= t <= entry_end and is_continuous_session(t):
         if daily_loss_guard(state):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
+            quick_stoploss_check(client, state, dry_run, confirm, cfg)
             return
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
@@ -643,6 +702,7 @@ def run_once(dry_run: bool, confirm: str | None):
         )
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols), "held_themes": list(held_themes)}, notify=True)
+            quick_stoploss_check(client, state, dry_run, confirm, cfg)
             return
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
@@ -669,6 +729,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 {"reason": "insufficient_usable_cash", "cash": cash, "usable_cash": usable_cash, "min_orderable_cash": min_orderable_cash},
                 notify=True,
             )
+            quick_stoploss_check(client, state, dry_run, confirm, cfg)
             return
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
@@ -698,6 +759,7 @@ def run_once(dry_run: bool, confirm: str | None):
 
         if not symbol:
             log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash}, notify=True)
+            quick_stoploss_check(client, state, dry_run, confirm, cfg)
             return
 
         total_qty = 0
