@@ -913,8 +913,9 @@ def run_once(dry_run: bool, confirm: str | None):
                             state["consecutive_stoplosses"] = 0
                         closed = True
 
-        # stop loss -10%
-        if (not closed) and pnl <= -10.0:
+        # stop loss (configurable)
+        stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
+        if (not closed) and pnl <= -stoploss_pct:
             if defer_today:
                 log_event("stoploss_deferred_limit_up", {"symbol": symbol, "pnl_pct": round(pnl, 2)}, notify=True)
             elif not is_continuous_session(t):
