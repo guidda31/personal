@@ -577,8 +577,8 @@ def available_cash_for_buy(balance: dict) -> int:
     return max(0, remain - max(0, buffer_w))
 
 
-def quick_stoploss_check(client: KISClient, state: dict, dry_run: bool, confirm: str | None, cfg) -> bool:
-    """Run stoploss for open positions even when entry path exits early."""
+def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str | None, cfg) -> bool:
+    """Run tp1/trail/stoploss checks even when entry path exits early."""
     t = now_kst().time()
     if not is_continuous_session(t):
         return False
@@ -599,33 +599,76 @@ def quick_stoploss_check(client: KISClient, state: dict, dry_run: bool, confirm:
             continue
 
         pnl = (cur - avg) / avg * 100
-        stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
-        if pnl > -stoploss_pct:
-            updated_positions.append(p)
-            continue
-
         prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
         sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
+        closed = False
 
-        if dry_run:
-            log_event("stoploss_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
-            changed = True
-            continue
+        # tp1
+        tp1_enabled = str(os.getenv("DT_TP1_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        tp1_done = bool(p.get("tp1_done", False))
+        tp1_pct = env_float("DT_TP1_PCT", 2.0)
+        tp1_ratio = max(0.1, min(0.9, env_float("DT_TP1_SELL_RATIO", 0.5)))
+        if tp1_enabled and (not tp1_done) and pnl >= tp1_pct:
+            sell_qty = min(qty, max(1, int(qty * tp1_ratio)))
+            if dry_run:
+                log_event("tp1_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                p["tp1_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("tp1_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, sell_qty, sell_price, reason="tp1", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    p["tp1_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    changed = True
+                    if qty <= 0:
+                        closed = True
 
-        if cfg.mode == "real" and confirm != "REAL_ORDER":
-            raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+        # trail
+        peak = float(p.get("peak_pnl_pct", -999.0) or -999.0)
+        peak = max(peak, pnl)
+        p["peak_pnl_pct"] = round(peak, 4)
+        trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
+        pullback = peak - pnl
+        if (not closed) and trail_enabled and bool(p.get("tp1_done", False)) and pnl > 0 and pullback >= trail_gap:
+            if dry_run:
+                log_event("trail_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                closed = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                log_event("trail_sell", {"symbol": symbol, "qty": qty, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, qty, sell_price, reason="trail", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    changed = True
+                    closed = True
 
-        res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
-        log_event("stoploss_sell", {"symbol": symbol, "result": res, "source": "entry_early_exit"}, notify=True)
-        ok = str((res or {}).get("rt_cd", "")) == "0"
-        if ok:
-            append_trade_history(
-                "SELL", symbol, qty, sell_price, reason="stoploss",
-                order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
-            )
-            state["consecutive_stoplosses"] = int(state.get("consecutive_stoplosses", 0) or 0) + 1
-            changed = True
-        else:
+        # stoploss
+        stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
+        if (not closed) and pnl <= -stoploss_pct:
+            if dry_run:
+                log_event("stoploss_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                closed = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                log_event("stoploss_sell", {"symbol": symbol, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, qty, sell_price, reason="stoploss", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    state["consecutive_stoplosses"] = int(state.get("consecutive_stoplosses", 0) or 0) + 1
+                    changed = True
+                    closed = True
+
+        if not closed:
             updated_positions.append(p)
 
     if changed:
@@ -684,7 +727,7 @@ def run_once(dry_run: bool, confirm: str | None):
     if entry_start <= t <= entry_end and is_continuous_session(t):
         if daily_loss_guard(state):
             log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
-            quick_stoploss_check(client, state, dry_run, confirm, cfg)
+            quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
@@ -702,7 +745,7 @@ def run_once(dry_run: bool, confirm: str | None):
         )
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols), "held_themes": list(held_themes)}, notify=True)
-            quick_stoploss_check(client, state, dry_run, confirm, cfg)
+            quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
         raw_price = int(q.get("stck_prpr", "0") or 0)
@@ -729,7 +772,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 {"reason": "insufficient_usable_cash", "cash": cash, "usable_cash": usable_cash, "min_orderable_cash": min_orderable_cash},
                 notify=True,
             )
-            quick_stoploss_check(client, state, dry_run, confirm, cfg)
+            quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
@@ -759,7 +802,7 @@ def run_once(dry_run: bool, confirm: str | None):
 
         if not symbol:
             log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash}, notify=True)
-            quick_stoploss_check(client, state, dry_run, confirm, cfg)
+            quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
         total_qty = 0
