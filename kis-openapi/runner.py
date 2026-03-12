@@ -763,28 +763,39 @@ def run_once(dry_run: bool, confirm: str | None):
         # hard cap per-symbol exposure (percent of available cash)
         max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
         symbol_cap_cash = int(cash * (max_symbol_exposure_pct / 100.0) * size_multiplier)
-        usable_cash = min(usable_cash, symbol_cap_cash)
+
+        def symbol_remaining_budget(selected_symbol: str) -> tuple[int, int, int]:
+            existing_symbol_value = 0
+            for p in (state.get("positions") or []):
+                if str(p.get("symbol", "")).strip() != selected_symbol:
+                    continue
+                pq = int(p.get("qty", 0) or 0)
+                pa = int(p.get("avg_price", 0) or 0)
+                if pq > 0 and pa > 0:
+                    existing_symbol_value += pq * pa
+            remaining = max(0, symbol_cap_cash - existing_symbol_value)
+            return remaining, existing_symbol_value, symbol_cap_cash
+
+        remaining_cap_cash, existing_symbol_value, symbol_cap_cash = symbol_remaining_budget(symbol)
+        usable_cash = min(usable_cash, remaining_cap_cash)
 
         min_orderable_cash = env_int("DT_MIN_ORDERABLE_CASH", 200000)
-        if usable_cash < max(1000, min_orderable_cash):
-            log_event(
-                "entry_skip",
-                {"reason": "insufficient_usable_cash", "cash": cash, "usable_cash": usable_cash, "min_orderable_cash": min_orderable_cash},
-                notify=True,
-            )
-            quick_exit_check(client, state, dry_run, confirm, cfg)
-            return
 
         splits = parse_splits(os.getenv("DT_ENTRY_SPLITS", "40,35,25"))
         interval_sec = env_int("DT_ENTRY_SPLIT_INTERVAL_SEC", 45)
 
-        # If selected symbol is too expensive to buy even 1 share with total usable cash,
-        # fallback to next candidates so affordable symbols can be bought.
+        # If selected symbol is too expensive or over symbol-cap, fallback to next candidates.
         fallback_try = 0
-        while symbol and raw_price > max(1, usable_cash) and fallback_try < 8:
+        while symbol and (raw_price > max(1, usable_cash) or usable_cash < max(1000, min_orderable_cash)) and fallback_try < 8:
             fallback_try += 1
             excluded_symbols.add(symbol)
-            log_event("candidate_skip", {"symbol": symbol, "reason": f"price_over_usable_cash:{raw_price}>{usable_cash}"})
+            if usable_cash < max(1000, min_orderable_cash):
+                log_event("candidate_skip", {
+                    "symbol": symbol,
+                    "reason": f"symbol_cap_or_cash_limit:usable={usable_cash},existing={existing_symbol_value},cap={symbol_cap_cash}"
+                })
+            else:
+                log_event("candidate_skip", {"symbol": symbol, "reason": f"price_over_usable_cash:{raw_price}>{usable_cash}"})
             ns, nscore, nq, ntheme = pick_top_symbol(
                 client,
                 exclude_symbols=excluded_symbols,
@@ -799,9 +810,22 @@ def run_once(dry_run: bool, confirm: str | None):
             prev_close = int(q.get("stck_sdpr", "0") or 0)
             regime = volatility_regime_from_quote(q)
             frac = position_fraction(regime)
+            remaining_cap_cash, existing_symbol_value, symbol_cap_cash = symbol_remaining_budget(symbol)
+            usable_cash = min(int(cash * frac * size_multiplier), remaining_cap_cash)
 
         if not symbol:
             log_event("entry_skip", {"reason": "no affordable candidate", "usable_cash": usable_cash}, notify=True)
+            quick_exit_check(client, state, dry_run, confirm, cfg)
+            return
+
+        if usable_cash < max(1000, min_orderable_cash):
+            log_event("entry_skip", {
+                "reason": "insufficient_usable_cash_after_symbol_cap",
+                "cash": cash,
+                "usable_cash": usable_cash,
+                "min_orderable_cash": min_orderable_cash,
+                "symbol": symbol,
+            }, notify=True)
             quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
