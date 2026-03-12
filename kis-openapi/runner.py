@@ -956,6 +956,8 @@ def run_once(dry_run: bool, confirm: str | None):
     exit_start = env_time("DT_EXIT_START", "15:15")
     exit_end = env_time("DT_EXIT_END", "15:20")
     exit_retry_end = env_time("DT_EOD_RETRY_END", "15:30")
+    # include the full exit minute to avoid missing liquidation at hh:mm:01~59
+    exit_end_inclusive = dt.time(exit_end.hour, exit_end.minute, 59)
 
     for p in positions:
         symbol = str(p.get("symbol", "")).strip()
@@ -1074,8 +1076,8 @@ def run_once(dry_run: bool, confirm: str | None):
                         state["trading_disabled_today"] = False
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
-        # force close in configured exit window
-        if (not closed) and exit_start <= t <= exit_end and is_continuous_session(t):
+        # force close in configured exit window (full minute inclusive)
+        if (not closed) and exit_start <= t <= exit_end_inclusive and is_continuous_session(t):
             if defer_today:
                 log_event("eod_close_deferred_limit_up", {"symbol": symbol, "entry_date": p.get("entry_date")}, notify=True)
             elif should_hold_overnight(d.get("output", {}), pnl):
@@ -1111,7 +1113,8 @@ def run_once(dry_run: bool, confirm: str | None):
                         log_event("daily_stop_triggered", {"realized_pnl_pct": round(state['realized_pnl_pct'], 2)}, notify=True)
 
         # retry liquidation after exit window (safety net)
-        if (not closed) and (t > exit_end) and (t <= exit_retry_end) and is_continuous_session(t):
+        # do not require continuous-session here: intended for 15:20~15:30 retry window.
+        if (not closed) and (t > exit_end_inclusive) and (t <= exit_retry_end):
             if defer_today:
                 log_event("eod_retry_deferred_limit_up", {"symbol": symbol, "entry_date": p.get("entry_date")}, notify=True)
             elif should_hold_overnight(d.get("output", {}), pnl):
