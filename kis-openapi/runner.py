@@ -577,6 +577,17 @@ def available_cash_for_buy(balance: dict) -> int:
     return max(0, remain - max(0, buffer_w))
 
 
+def orderable_qty_for_symbol(client: KISClient, symbol: str) -> int:
+    try:
+        b = client.get_balance()
+        for row in (b.get("output1") or []):
+            if str(row.get("pdno", "")).strip() == str(symbol).strip():
+                return int(float(row.get("ord_psbl_qty", "0") or 0))
+    except Exception:
+        return 0
+    return 0
+
+
 def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str | None, cfg) -> bool:
     """Run tp1/trail/stoploss checks even when entry path exits early."""
     t = now_kst().time()
@@ -1193,12 +1204,18 @@ def run_once(dry_run: bool, confirm: str | None):
                     else:
                         if cfg.mode == "real" and confirm != "REAL_ORDER":
                             raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                        res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
-                        log_event("eod_close_sell", {"symbol": symbol, "result": res, "reason": reason}, notify=True)
+                        sell_qty = qty
+                        sell_qty = min(qty, orderable_qty_for_symbol(client, symbol))
+                        if sell_qty <= 0:
+                            log_event("eod_close_skip", {"symbol": symbol, "reason": "no_orderable_qty", "req_qty": qty}, notify=True)
+                            res = {"rt_cd": "1", "msg_cd": "NO_QTY"}
+                        else:
+                            res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                        log_event("eod_close_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "reason": reason}, notify=True)
                         ok = str((res or {}).get("rt_cd", "")) == "0"
                         if ok:
                             append_trade_history(
-                                "SELL", symbol, qty, sell_price, reason="eod_close",
+                                "SELL", symbol, sell_qty, sell_price, reason="eod_close",
                                 order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
                             )
                             closed = True
@@ -1226,12 +1243,18 @@ def run_once(dry_run: bool, confirm: str | None):
                 else:
                     if cfg.mode == "real" and confirm != "REAL_ORDER":
                         raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
-                    res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
-                    log_event("eod_retry_sell", {"symbol": symbol, "result": res}, notify=True)
+                    sell_qty = qty
+                    sell_qty = min(qty, orderable_qty_for_symbol(client, symbol))
+                    if sell_qty <= 0:
+                        log_event("eod_retry_skip", {"symbol": symbol, "reason": "no_orderable_qty", "req_qty": qty}, notify=True)
+                        res = {"rt_cd": "1", "msg_cd": "NO_QTY"}
+                    else:
+                        res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                    log_event("eod_retry_sell", {"symbol": symbol, "qty": sell_qty, "result": res}, notify=True)
                     ok = str((res or {}).get("rt_cd", "")) == "0"
                     if ok:
                         append_trade_history(
-                            "SELL", symbol, qty, sell_price, reason="eod_retry",
+                            "SELL", symbol, sell_qty, sell_price, reason="eod_retry",
                             order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
                         )
                         closed = True
