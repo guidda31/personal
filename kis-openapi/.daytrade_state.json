@@ -1,0 +1,48 @@
+{
+  "date": "2026-03-13",
+  "entered": true,
+  "symbol": "003280",
+  "qty": 12,
+  "avg_price": 2415,
+  "realized_pnl_pct": 1.743119266055046,
+  "trading_disabled_today": false,
+  "entry_legs_done": 2,
+  "bot_managed": true,
+  "entry_date": "2026-03-13",
+  "defer_sell_next_day": false,
+  "positions": [
+    {
+      "symbol": "003280",
+      "qty": 12,
+      "avg_price": 2415,
+      "entry_date": "2026-03-13",
+      "defer_sell_next_day": false,
+      "theme": "shipping",
+      "tp1_done": false,
+      "peak_pnl_pct": -1.0352
+    },
+    {
+      "symbol": "047400",
+      "qty": 57,
+      "avg_price": 1635,
+      "entry_date": "2026-03-12",
+      "defer_sell_next_day": false,
+      "theme": "general",
+      "tp1_done": true,
+      "peak_pnl_pct": 3.4862
+    },
+    {
+      "symbol": "005880",
+      "qty": 7,
+      "avg_price": 2292,
+      "entry_date": "2026-03-13",
+      "defer_sell_next_day": false,
+      "theme": "general",
+      "tp1_done": false,
+      "peak_pnl_pct": -0.0873,
+      "sl1_done": true,
+      "sl2_done": true
+    }
+  ],
+  "consecutive_stoplosses": 3
+}
