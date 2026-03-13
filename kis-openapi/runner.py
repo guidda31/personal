@@ -650,7 +650,53 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
                     changed = True
                     closed = True
 
-        # stoploss
+        # partial stoploss stages
+        sl1_pct = abs(env_float("DT_STOPLOSS_STAGE1_PCT", 2.5))
+        sl2_pct = abs(env_float("DT_STOPLOSS_STAGE2_PCT", 3.5))
+        sl1_ratio = max(0.1, min(0.9, env_float("DT_STOPLOSS_STAGE1_RATIO", 0.3)))
+        sl2_ratio = max(0.1, min(0.9, env_float("DT_STOPLOSS_STAGE2_RATIO", 0.3)))
+
+        if (not closed) and (not bool(p.get("sl1_done", False))) and pnl <= -sl1_pct:
+            sell_qty = min(qty, max(1, int(qty * sl1_ratio)))
+            if dry_run:
+                log_event("stoploss_stage1_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                p["sl1_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("stoploss_stage1_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, sell_qty, sell_price, reason="stoploss_stage1", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    p["sl1_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    changed = True
+                    if qty <= 0:
+                        closed = True
+
+        if (not closed) and (not bool(p.get("sl2_done", False))) and pnl <= -sl2_pct:
+            sell_qty = min(qty, max(1, int(qty * sl2_ratio)))
+            if dry_run:
+                log_event("stoploss_stage2_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                p["sl2_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("stoploss_stage2_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, sell_qty, sell_price, reason="stoploss_stage2", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    p["sl2_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    changed = True
+                    if qty <= 0:
+                        closed = True
+
+        # full stoploss
         stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
         if (not closed) and pnl <= -stoploss_pct:
             if dry_run:
@@ -1044,7 +1090,61 @@ def run_once(dry_run: bool, confirm: str | None):
                             state["consecutive_stoplosses"] = 0
                         closed = True
 
-        # stop loss (configurable)
+        # partial stoploss stages
+        sl1_pct = abs(env_float("DT_STOPLOSS_STAGE1_PCT", 2.5))
+        sl2_pct = abs(env_float("DT_STOPLOSS_STAGE2_PCT", 3.5))
+        sl1_ratio = max(0.1, min(0.9, env_float("DT_STOPLOSS_STAGE1_RATIO", 0.3)))
+        sl2_ratio = max(0.1, min(0.9, env_float("DT_STOPLOSS_STAGE2_RATIO", 0.3)))
+
+        if (not closed) and (not bool(p.get("sl1_done", False))) and pnl <= -sl1_pct and is_continuous_session(t):
+            sell_qty = min(qty, max(1, int(qty * sl1_ratio)))
+            if dry_run:
+                log_event("stoploss_stage1_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price}, notify=True)
+                p["sl1_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("stoploss_stage1_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "pnl_pct": round(pnl, 2)}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history(
+                        "SELL", symbol, sell_qty, sell_price, reason="stoploss_stage1",
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
+                    p["sl1_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    part_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + (part_pnl_pct * (sell_qty / max(1, qty + sell_qty)))
+                    if qty <= 0:
+                        closed = True
+
+        if (not closed) and (not bool(p.get("sl2_done", False))) and pnl <= -sl2_pct and is_continuous_session(t):
+            sell_qty = min(qty, max(1, int(qty * sl2_ratio)))
+            if dry_run:
+                log_event("stoploss_stage2_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price}, notify=True)
+                p["sl2_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("stoploss_stage2_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "pnl_pct": round(pnl, 2)}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history(
+                        "SELL", symbol, sell_qty, sell_price, reason="stoploss_stage2",
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
+                    p["sl2_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    part_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + (part_pnl_pct * (sell_qty / max(1, qty + sell_qty)))
+                    if qty <= 0:
+                        closed = True
+
+        # stop loss (full)
         stoploss_pct = abs(env_float("DT_STOPLOSS_PCT", 10.0))
         if (not closed) and pnl <= -stoploss_pct:
             if defer_today:
