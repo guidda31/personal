@@ -229,14 +229,14 @@ def load_bot_open_qty_from_trades() -> dict[str, int]:
 
 
 def reconcile_positions_with_balance(client: KISClient, state: dict, today: str) -> bool:
-    """Rebuild bot-managed positions from (trade history open qty ∩ live holdings)."""
+    """Rebuild bot-managed positions from live holdings (+ bot trade history hints).
+
+    NOTE:
+    - If trade-history net qty is wrong (e.g. order accepted but later rejected),
+      live holdings must still be managed for intraday/EOD liquidation.
+    - Sell-ban symbols are excluded from auto-managed positions.
+    """
     open_qty = load_bot_open_qty_from_trades()
-    if not open_qty:
-        if state.get("positions"):
-            state["positions"] = []
-            sync_legacy_fields_from_positions(state)
-            return True
-        return False
 
     bal = client.get_balance()
     holdings = {}
@@ -256,11 +256,18 @@ def reconcile_positions_with_balance(client: KISClient, state: dict, today: str)
             avg = 0
         holdings[sym] = {"qty": qty, "avg": avg}
 
+    sell_ban = {
+        s.strip() for s in str(os.getenv("DT_SELL_BAN_SYMBOLS", "006840")).split(",") if s.strip()
+    }
+
     prev_by_symbol = {str(p.get("symbol", "")).strip(): p for p in (state.get("positions") or []) if p.get("symbol")}
     rebuilt = []
+    rebuilt_symbols = set()
+
+    # 1) prefer trade-history hint, but clip by live holdings
     for sym, oq in open_qty.items():
         h = holdings.get(sym)
-        if not h:
+        if not h or sym in sell_ban:
             continue
         qty = min(int(h.get("qty", 0)), int(oq))
         if qty <= 0:
@@ -269,6 +276,23 @@ def reconcile_positions_with_balance(client: KISClient, state: dict, today: str)
         rebuilt.append({
             "symbol": sym,
             "qty": qty,
+            "avg_price": int(h.get("avg", 0) or 0),
+            "entry_date": prev.get("entry_date") or today,
+            "defer_sell_next_day": bool(prev.get("defer_sell_next_day", False)),
+            "theme": prev.get("theme") or "general",
+            "tp1_done": bool(prev.get("tp1_done", False)),
+            "peak_pnl_pct": float(prev.get("peak_pnl_pct", 0.0) or 0.0),
+        })
+        rebuilt_symbols.add(sym)
+
+    # 2) safety net: include orphan live holdings even when trade-history is wrong/missing
+    for sym, h in holdings.items():
+        if sym in sell_ban or sym in rebuilt_symbols:
+            continue
+        prev = prev_by_symbol.get(sym, {})
+        rebuilt.append({
+            "symbol": sym,
+            "qty": int(h.get("qty", 0) or 0),
             "avg_price": int(h.get("avg", 0) or 0),
             "entry_date": prev.get("entry_date") or today,
             "defer_sell_next_day": bool(prev.get("defer_sell_next_day", False)),
