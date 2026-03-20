@@ -360,6 +360,31 @@ def infer_theme(symbol: str, name: str) -> str:
     return "general"
 
 
+def _daily_trend_ok(client: KISClient, symbol: str) -> tuple[bool, str]:
+    enabled = str(os.getenv("DT_DAILY_TREND_FILTER", "1")).strip().lower() in {"1", "true", "yes", "y"}
+    if not enabled:
+        return True, "disabled"
+    try:
+        r = client.get_domestic_daily(symbol)
+        rows = r.get("output") or r.get("output2") or []
+        closes = [int(x.get("stck_clpr", "0") or 0) for x in rows if int(x.get("stck_clpr", "0") or 0) > 0]
+        if len(closes) < 20:
+            return False, "daily_insufficient"
+        c = closes[0]
+        ma5 = sum(closes[:5]) / 5.0
+        ma20 = sum(closes[:20]) / 20.0
+        max_ext_pct = max(1.0, env_float("DT_DAILY_MAX_EXT_PCT", 15.0))
+        if c < ma20:
+            return False, f"daily_below_ma20:{c}<{int(ma20)}"
+        if ma5 < ma20:
+            return False, f"daily_ma5_below_ma20:{int(ma5)}<{int(ma20)}"
+        if c > ma20 * (1.0 + max_ext_pct / 100.0):
+            return False, f"daily_overextended:{round((c/ma20-1)*100,2)}%"
+        return True, "ok"
+    except Exception as e:
+        return False, f"daily_error:{str(e)[:80]}"
+
+
 def pick_top_symbol(
     client: KISClient,
     exclude_symbols: set[str] | None = None,
@@ -391,6 +416,11 @@ def pick_top_symbol(
         min_price = env_int("DT_MIN_STOCK_PRICE", 5000)
         if cur < max(1, min_price):
             log_event("candidate_skip", {"symbol": s, "reason": f"price_below_min:{cur}"})
+            continue
+
+        trend_ok, trend_reason = _daily_trend_ok(client, s)
+        if not trend_ok:
+            log_event("candidate_skip", {"symbol": s, "reason": trend_reason})
             continue
 
         # skip names already at upper limit when configured
