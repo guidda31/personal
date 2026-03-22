@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 
 TARGET = os.getenv("AI_TREND_TARGET", "1261506890")
 CHANNEL = os.getenv("AI_TREND_CHANNEL", "telegram")
+ACCOUNT = os.getenv("AI_TREND_ACCOUNT", "telegram-bot-2")
 QUERIES = ["ai", "인공지능", "ai 에이전트", "생성형 ai", "llm"]
 
 STOPWORDS = {
@@ -26,6 +27,7 @@ def send(msg: str):
         [
             "openclaw", "message", "send",
             "--channel", CHANNEL,
+            "--account", ACCOUNT,
             "--target", TARGET,
             "--message", msg,
         ],
