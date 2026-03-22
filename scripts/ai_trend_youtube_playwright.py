@@ -4,103 +4,123 @@ import re
 import subprocess
 import sys
 import urllib.parse
+from collections import Counter
 from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
 TARGET = os.getenv("AI_TREND_TARGET", "1261506890")
 CHANNEL = os.getenv("AI_TREND_CHANNEL", "telegram")
-PROFILE_DIR = os.getenv("AI_TREND_PW_PROFILE", "/home/guidda/.openclaw/workspace/tmp/pw-youtube-profile")
-URL = "https://www.youtube.com/feed/history"
+QUERIES = ["ai", "인공지능", "ai 에이전트", "생성형 ai", "llm"]
+
+STOPWORDS = {
+    "official", "video", "mv", "live", "feat", "ft", "shorts", "youtube", "music",
+    "the", "and", "with", "from", "this", "that", "you", "your", "for",
+    "공식", "뮤직비디오", "라이브", "티저", "예고", "쇼츠", "브이로그", "리액션",
+    "지금", "재생", "조회수", "전", "새", "동영상", "뉴스",
+}
 
 
 def send(msg: str):
     subprocess.run(
         [
-            "openclaw",
-            "message",
-            "send",
-            "--channel",
-            CHANNEL,
-            "--target",
-            TARGET,
-            "--message",
-            msg,
+            "openclaw", "message", "send",
+            "--channel", CHANNEL,
+            "--target", TARGET,
+            "--message", msg,
         ],
         check=False,
     )
 
 
-def build_report(terms: list[str]) -> str:
+def tokenize(text: str) -> list[str]:
+    text = text.lower()
+    text = re.sub(r"[^0-9a-zA-Z가-힣\s]", " ", text)
+    tokens = [t.strip() for t in text.split() if len(t.strip()) >= 2]
+    out = []
+    for t in tokens:
+        if t in STOPWORDS:
+            continue
+        if t.isdigit():
+            continue
+        out.append(t)
+    return out
+
+
+def build_report(keywords: list[str], titles: list[str]) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M KST")
-    top = terms[:10]
-    lines = [f"[AI 트렌드 데일리 | {now}]", "YouTube 검색기록 기반 키워드 TOP10"]
-    for i, t in enumerate(top, 1):
-        lines.append(f"{i}. {t}")
-    if not top:
-        lines.append("- 검색기록 키워드 추출 실패")
+    lines = [
+        f"[AI 트렌드 데일리 | {now}]",
+        "YouTube 공개 검색결과 기반 키워드 TOP10",
+    ]
+    for i, k in enumerate(keywords[:10], 1):
+        lines.append(f"{i}. {k}")
+
+    lines.append("")
+    lines.append("중요 영상(상위 5)")
+    for i, t in enumerate(titles[:5], 1):
+        lines.append(f"- {i}) {t}")
+
+    lines.append("")
+    lines.append("우선순위 3")
+    for k in keywords[:3]:
+        lines.append(f"- {k}")
+
+    lines.append("")
+    lines.append("※ 개인 검색기록이 아닌 YouTube 공개 검색결과 기준")
     return "\n".join(lines)
 
 
-def extract_terms_from_html(html: str) -> list[str]:
-    found = re.findall(r"/results\\?search_query=([^\"&]+)", html)
-    terms: list[str] = []
-    seen = set()
-    for x in found:
-        t = urllib.parse.unquote_plus(x).strip()
-        if not t:
-            continue
-        if len(t) > 80:
-            continue
-        # exclude obvious UI noise
-        if t.lower() in {"youtube", "music", "news", "shorts"}:
-            continue
-        if t in seen:
-            continue
-        seen.add(t)
-        terms.append(t)
-    return terms
+def collect_titles(page, query: str) -> list[str]:
+    q = urllib.parse.quote_plus(query)
+    url = f"https://www.youtube.com/results?search_query={q}&sp=CAI%253D"  # upload date
+    page.goto(url, wait_until="domcontentloaded", timeout=90000)
+    page.wait_for_timeout(2500)
+
+    titles = []
+    loc = page.locator("ytd-video-renderer a#video-title")
+    cnt = min(loc.count(), 12)
+    for i in range(cnt):
+        txt = (loc.nth(i).inner_text() or "").strip()
+        if txt and txt not in titles:
+            titles.append(txt)
+    return titles
 
 
 def main():
-    os.makedirs(PROFILE_DIR, exist_ok=True)
     try:
         with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(
-                PROFILE_DIR,
-                headless=True,
-                args=["--no-sandbox"],
-            )
-            page = context.new_page()
-            page.goto(URL, wait_until="domcontentloaded", timeout=90000)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            page = browser.new_page()
 
-            # try switch to search history tab if visible
-            for txt in ["검색 기록", "Search history"]:
-                loc = page.get_by_role("link", name=txt)
-                if loc.count() > 0:
-                    loc.first.click(timeout=3000)
-                    page.wait_for_timeout(1500)
-                    break
+            all_titles = []
+            seen = set()
+            for q in QUERIES:
+                for t in collect_titles(page, q):
+                    if t not in seen:
+                        seen.add(t)
+                        all_titles.append(t)
 
-            html = page.content()
-            title = page.title().lower()
-            url = page.url.lower()
-            context.close()
+            browser.close()
 
-        if "signin" in url or "로그인" in title or "sign in" in title:
-            send("🚨 AI 트렌드 수집 실패: YouTube 로그인 세션 없음(Playwright)\n1회 수동 로그인 필요")
-            return 1
-
-        terms = extract_terms_from_html(html)
-        if not terms:
-            send("🚨 AI 트렌드 수집 실패: 검색기록 키워드 추출 0건")
+        if not all_titles:
+            send("🚨 AI 트렌드 수집 실패: YouTube 공개 검색결과 제목 추출 0건")
             return 2
 
-        send(build_report(terms))
+        counter = Counter()
+        for t in all_titles[:40]:
+            counter.update(tokenize(t))
+
+        keywords = [k for k, _ in counter.most_common(15)]
+        if not keywords:
+            send("🚨 AI 트렌드 수집 실패: 키워드 추출 0건")
+            return 3
+
+        send(build_report(keywords, all_titles))
         return 0
     except Exception as e:
-        send(f"🚨 AI 트렌드 수집 실패(Playwright): {str(e)[:240]}")
-        return 3
+        send(f"🚨 AI 트렌드 수집 실패(Playwright 공개검색): {str(e)[:220]}")
+        return 1
 
 
 if __name__ == "__main__":
