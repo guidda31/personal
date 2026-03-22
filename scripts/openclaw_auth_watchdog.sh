@@ -41,6 +41,6 @@ fi
 echo "$FINGERPRINT" > "$LAST_HASH_FILE"
 
 LAST_LINE="$(printf '%s\n' "$MATCHES" | tail -n 1)"
-MSG="⚠️ OpenClaw 인증 경고\n- OAuth refresh 실패 감지\n- 자동 복구 필요 가능\n- 마지막 로그: ${LAST_LINE}"
+MSG="🚨 OpenClaw 인증 끊김 감지 (Codex OAuth 실패)\n즉시 재인증 필요\n로그: ${LAST_LINE}"
 
 openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG" >/dev/null 2>&1 || true
