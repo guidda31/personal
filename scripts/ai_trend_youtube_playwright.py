@@ -47,7 +47,7 @@ def tokenize(text: str) -> list[str]:
     return out
 
 
-def build_report(keywords: list[str], titles: list[str]) -> str:
+def build_report(keywords: list[str], videos: list[tuple[str, str]]) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M KST")
     lines = [
         f"[AI 트렌드 데일리 | {now}]",
@@ -58,8 +58,9 @@ def build_report(keywords: list[str], titles: list[str]) -> str:
 
     lines.append("")
     lines.append("중요 영상(상위 5)")
-    for i, t in enumerate(titles[:5], 1):
-        lines.append(f"- {i}) {t}")
+    for i, (title, link) in enumerate(videos[:5], 1):
+        lines.append(f"- {i}) {title}")
+        lines.append(f"  {link}")
 
     lines.append("")
     lines.append("우선순위 3")
@@ -71,20 +72,32 @@ def build_report(keywords: list[str], titles: list[str]) -> str:
     return "\n".join(lines)
 
 
-def collect_titles(page, query: str) -> list[str]:
+def collect_titles(page, query: str) -> list[tuple[str, str]]:
     q = urllib.parse.quote_plus(query)
     url = f"https://www.youtube.com/results?search_query={q}&sp=CAI%253D"  # upload date
     page.goto(url, wait_until="domcontentloaded", timeout=90000)
     page.wait_for_timeout(2500)
 
-    titles = []
+    videos: list[tuple[str, str]] = []
+    seen = set()
     loc = page.locator("ytd-video-renderer a#video-title")
     cnt = min(loc.count(), 12)
     for i in range(cnt):
-        txt = (loc.nth(i).inner_text() or "").strip()
-        if txt and txt not in titles:
-            titles.append(txt)
-    return titles
+        el = loc.nth(i)
+        txt = (el.inner_text() or "").strip()
+        href = (el.get_attribute("href") or "").strip()
+        if not txt:
+            continue
+        if href.startswith("/"):
+            href = f"https://www.youtube.com{href}"
+        if not href.startswith("http"):
+            continue
+        key = (txt, href)
+        if key in seen:
+            continue
+        seen.add(key)
+        videos.append(key)
+    return videos
 
 
 def main():
@@ -93,22 +106,22 @@ def main():
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
             page = browser.new_page()
 
-            all_titles = []
+            all_videos: list[tuple[str, str]] = []
             seen = set()
             for q in QUERIES:
-                for t in collect_titles(page, q):
-                    if t not in seen:
-                        seen.add(t)
-                        all_titles.append(t)
+                for v in collect_titles(page, q):
+                    if v not in seen:
+                        seen.add(v)
+                        all_videos.append(v)
 
             browser.close()
 
-        if not all_titles:
+        if not all_videos:
             send("🚨 AI 트렌드 수집 실패: YouTube 공개 검색결과 제목 추출 0건")
             return 2
 
         counter = Counter()
-        for t in all_titles[:40]:
+        for t, _ in all_videos[:40]:
             counter.update(tokenize(t))
 
         keywords = [k for k, _ in counter.most_common(15)]
@@ -116,7 +129,7 @@ def main():
             send("🚨 AI 트렌드 수집 실패: 키워드 추출 0건")
             return 3
 
-        send(build_report(keywords, all_titles))
+        send(build_report(keywords, all_videos))
         return 0
     except Exception as e:
         send(f"🚨 AI 트렌드 수집 실패(Playwright 공개검색): {str(e)[:220]}")
