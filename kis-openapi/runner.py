@@ -1292,7 +1292,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 log_event("eod_retry_hold_overnight", {"symbol": symbol, "pnl_pct": round(pnl, 2), "window": f"{exit_end.strftime('%H:%M')}-{exit_retry_end.strftime('%H:%M')}"}, notify=True)
             else:
                 if dry_run:
-                    log_event("eod_retry_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price}, notify=True)
+                    log_event("eod_retry_dry_run", {"symbol": symbol, "qty": qty, "price": 0, "ord_dvsn": "01"}, notify=True)
                     closed = True
                 else:
                     if cfg.mode == "real" and confirm != "REAL_ORDER":
@@ -1303,8 +1303,9 @@ def run_once(dry_run: bool, confirm: str | None):
                         log_event("eod_retry_skip", {"symbol": symbol, "reason": "no_orderable_qty", "req_qty": qty}, notify=True)
                         res = {"rt_cd": "1", "msg_cd": "NO_QTY"}
                     else:
-                        res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
-                    log_event("eod_retry_sell", {"symbol": symbol, "qty": sell_qty, "result": res}, notify=True)
+                        # 15:20~15:30 단일가 재시도 구간은 시장가(ORD_DVSN=01)로 청산
+                        res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=0, ord_dvsn="01")
+                    log_event("eod_retry_sell", {"symbol": symbol, "qty": sell_qty, "ord_dvsn": "01", "result": res}, notify=True)
                     ok = str((res or {}).get("rt_cd", "")) == "0"
                     if ok:
                         append_trade_history(
