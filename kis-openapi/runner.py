@@ -152,6 +152,7 @@ def load_state() -> dict:
             "defer_sell_next_day": False,
             "positions": [],
             "consecutive_stoplosses": 0,
+            "loss_guard_reentry_count": 0,
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
@@ -571,6 +572,24 @@ def daily_loss_guard(state: dict) -> bool:
     return realized <= -max_loss_pct
 
 
+def loss_guard_reentry_allowed(state: dict, now_t: dt.time) -> tuple[bool, str]:
+    enabled = str(os.getenv("DT_LOSS_GUARD_REENTRY_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
+    if not enabled:
+        return False, "reentry_disabled"
+
+    start_t = env_time("DT_LOSS_GUARD_REENTRY_START", "13:00")
+    end_t = env_time("DT_LOSS_GUARD_REENTRY_END", "14:30")
+    if not (start_t <= now_t <= end_t):
+        return False, f"out_of_reentry_window:{start_t.strftime('%H:%M')}-{end_t.strftime('%H:%M')}"
+
+    max_count = max(0, env_int("DT_LOSS_GUARD_REENTRY_MAX", 1))
+    used = int(state.get("loss_guard_reentry_count", 0) or 0)
+    if used >= max_count:
+        return False, f"reentry_quota_exhausted:{used}/{max_count}"
+
+    return True, "allowed"
+
+
 def should_hold_overnight(quote_output: dict, pnl_pct: float) -> bool:
     enabled = str(os.getenv("DT_HOLD_OVERNIGHT_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
     if not enabled:
@@ -822,6 +841,7 @@ def run_once(dry_run: bool, confirm: str | None):
         state["realized_pnl_pct"] = 0.0
         state["trading_disabled_today"] = False
         state["entry_legs_done"] = 0
+        state["loss_guard_reentry_count"] = 0
         if state.get("defer_sell_next_day") and state.get("entry_date") != today:
             # Next day reached -> allow sell from today.
             state["defer_sell_next_day"] = False
@@ -836,10 +856,20 @@ def run_once(dry_run: bool, confirm: str | None):
     entry_start = env_time("DT_ENTRY_START", "09:01")
     entry_end = env_time("DT_ENTRY_END", "15:10")
     if entry_start <= t <= entry_end and is_continuous_session(t):
+        reentry_mode = False
         if daily_loss_guard(state):
-            log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0)}, notify=True)
-            quick_exit_check(client, state, dry_run, confirm, cfg)
-            return
+            allowed, reason = loss_guard_reentry_allowed(state, t)
+            if not allowed:
+                log_event("entry_skip", {"reason": "daily_loss_guard", "realized_pnl_pct": state.get("realized_pnl_pct", 0.0), "detail": reason}, notify=True)
+                quick_exit_check(client, state, dry_run, confirm, cfg)
+                return
+            reentry_mode = True
+            log_event("loss_guard_reentry", {
+                "realized_pnl_pct": state.get("realized_pnl_pct", 0.0),
+                "used": int(state.get("loss_guard_reentry_count", 0) or 0),
+                "max": max(0, env_int("DT_LOSS_GUARD_REENTRY_MAX", 1)),
+                "window": f"{os.getenv('DT_LOSS_GUARD_REENTRY_START', '13:00')}-{os.getenv('DT_LOSS_GUARD_REENTRY_END', '14:30')}",
+            }, notify=True)
 
         log_event("entry_scan_start", {"window": f"{entry_start.strftime('%H:%M')}-{entry_end.strftime('%H:%M')}", "mode": cfg.mode})
         held_symbols = {str(p.get("symbol", "")).strip() for p in (state.get("positions") or []) if p.get("symbol")}
@@ -870,6 +900,10 @@ def run_once(dry_run: bool, confirm: str | None):
         # consecutive stoploss protection: after 2+ stoplosses, cut sizing by 50%
         loss_streak = int(state.get("consecutive_stoplosses", 0) or 0)
         size_multiplier = 0.5 if loss_streak >= 2 else 1.0
+        if reentry_mode:
+            # loss-guard 해제 예외 진입은 기본보다 더 작게
+            reentry_mult = max(0.05, min(1.0, env_float("DT_LOSS_GUARD_REENTRY_SIZE_MULT", 0.3)))
+            size_multiplier *= reentry_mult
         usable_cash = int(usable_cash * size_multiplier)
         # hard cap per-symbol exposure (percent of available cash)
         max_symbol_exposure_pct = max(1.0, min(100.0, env_float("DT_MAX_SYMBOL_EXPOSURE_PCT", 40.0)))
@@ -1056,6 +1090,13 @@ def run_once(dry_run: bool, confirm: str | None):
                     "peak_pnl_pct": 0.0,
                 })
             state["positions"] = positions
+            if reentry_mode:
+                state["loss_guard_reentry_count"] = int(state.get("loss_guard_reentry_count", 0) or 0) + 1
+                log_event("loss_guard_reentry_used", {
+                    "symbol": symbol,
+                    "count": state["loss_guard_reentry_count"],
+                    "max": max(0, env_int("DT_LOSS_GUARD_REENTRY_MAX", 1)),
+                }, notify=True)
             if bought_at_upper_limit:
                 log_event("sell_deferred_limit_up", {"symbol": symbol, "entry_date": today}, notify=True)
             sync_legacy_fields_from_positions(state)
