@@ -230,6 +230,34 @@ def load_bot_open_qty_from_trades() -> dict[str, int]:
     return {k: max(0, v) for k, v in net.items() if v > 0}
 
 
+def load_today_stoploss_symbols(today: str) -> set[str]:
+    out: set[str] = set()
+    if not TRADE_LOG_FILE.exists():
+        return out
+    try:
+        with TRADE_LOG_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if str(row.get("date", "")) != today:
+                    continue
+                if str(row.get("side", "")).upper() != "SELL":
+                    continue
+                reason = str(row.get("reason", "")).lower()
+                if reason.startswith("stoploss"):
+                    sym = str(row.get("symbol", "")).strip()
+                    if sym:
+                        out.add(sym)
+    except Exception:
+        return set()
+    return out
+
+
 def reconcile_positions_with_balance(client: KISClient, state: dict, today: str) -> bool:
     """Rebuild bot-managed positions from live holdings (+ bot trade history hints).
 
@@ -442,6 +470,11 @@ def pick_top_symbol(
         max_day_rate = env_float("DT_MAX_DAY_RATE", 24.0)
         if rate < min_day_rate or rate > max_day_rate:
             log_event("candidate_skip", {"symbol": s, "reason": f"day_rate_out_of_range:{round(rate,2)}"})
+            continue
+
+        min_vol_rate = env_float("DT_MIN_VOL_RATE", 0.0)
+        if vol_rate < min_vol_rate:
+            log_event("candidate_skip", {"symbol": s, "reason": f"vol_rate_below_min:{round(vol_rate,2)}<{round(min_vol_rate,2)}"})
             continue
 
         score = rate * 0.65 + (vol_rate / 100.0) * 0.35
@@ -878,12 +911,35 @@ def run_once(dry_run: bool, confirm: str | None):
         prefer_div = str(os.getenv("DT_PREFER_DIVERSIFICATION", "1")).strip().lower() in {"1", "true", "yes", "y"}
         avoid_same_theme = str(os.getenv("DT_AVOID_SAME_THEME", "1")).strip().lower() in {"1", "true", "yes", "y"}
         allow_add_on = str(os.getenv("DT_ALLOW_ADD_ON_EXISTING", "0")).strip().lower() in {"1", "true", "yes", "y"}
+
+        # same-day stoploss symbols are blocked from reentry to reduce churn
+        block_after_stoploss = str(os.getenv("DT_BLOCK_REENTRY_AFTER_STOPLOSS", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        stopped_today = load_today_stoploss_symbols(today) if block_after_stoploss else set()
+
+        profitable_held_symbols: set[str] = set()
+        if allow_add_on:
+            for p in (state.get("positions") or []):
+                sym = str(p.get("symbol", "")).strip()
+                qty = int(p.get("qty", 0) or 0)
+                avg = int(p.get("avg_price", 0) or 0)
+                if not sym or qty <= 0 or avg <= 0:
+                    continue
+                try:
+                    qh = client.get_domestic_quote(sym).get("output", {})
+                    curh = int(qh.get("stck_prpr", "0") or 0)
+                except Exception:
+                    curh = 0
+                if curh > avg:
+                    profitable_held_symbols.add(sym)
+
         excluded_symbols = set(held_symbols if (prefer_div and not allow_add_on) else set())
+        excluded_symbols.update(stopped_today)
+
         symbol, score, q, sel_theme = pick_top_symbol(
             client,
             exclude_symbols=excluded_symbols,
             exclude_themes=held_themes if avoid_same_theme else set(),
-            allow_symbols=held_symbols if allow_add_on else set(),
+            allow_symbols=profitable_held_symbols if allow_add_on else set(),
         )
         if not symbol:
             log_event("entry_skip", {"reason": "no tradeable candidate", "held_symbols": list(held_symbols), "held_themes": list(held_themes)}, notify=True)
@@ -959,7 +1015,7 @@ def run_once(dry_run: bool, confirm: str | None):
                 client,
                 exclude_symbols=excluded_symbols,
                 exclude_themes=held_themes if avoid_same_theme else set(),
-                allow_symbols=held_symbols if allow_add_on else set(),
+                allow_symbols=profitable_held_symbols if allow_add_on else set(),
             )
             if not ns:
                 symbol = ""
