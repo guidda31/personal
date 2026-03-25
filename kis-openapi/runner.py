@@ -153,6 +153,7 @@ def load_state() -> dict:
             "positions": [],
             "consecutive_stoplosses": 0,
             "loss_guard_reentry_count": 0,
+            "last_entry_by_symbol": {},
         }
     return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
@@ -889,6 +890,18 @@ def run_once(dry_run: bool, confirm: str | None):
             quick_exit_check(client, state, dry_run, confirm, cfg)
             return
 
+        # same-symbol reentry cooldown to avoid rapid re-churn on one ticker
+        cooldown_sec = max(0, env_int("DT_REENTRY_COOLDOWN_SEC", 0))
+        if cooldown_sec > 0:
+            last_entry_by_symbol = state.get("last_entry_by_symbol") or {}
+            last_ts = int(last_entry_by_symbol.get(symbol, 0) or 0)
+            now_ts = int(now_kst().timestamp())
+            if last_ts > 0 and (now_ts - last_ts) < cooldown_sec:
+                remain = cooldown_sec - (now_ts - last_ts)
+                log_event("entry_skip", {"reason": "same_symbol_cooldown", "symbol": symbol, "remain_sec": remain}, notify=True)
+                quick_exit_check(client, state, dry_run, confirm, cfg)
+                return
+
         raw_price = int(q.get("stck_prpr", "0") or 0)
         prev_close = int(q.get("stck_sdpr", "0") or 0)
         regime = volatility_regime_from_quote(q)
@@ -897,9 +910,10 @@ def run_once(dry_run: bool, confirm: str | None):
         b = client.get_balance()
         cash = available_cash_for_buy(b)
         usable_cash = int(cash * frac)
-        # consecutive stoploss protection: after 2+ stoplosses, cut sizing by 50%
+        # consecutive stoploss protection: after 2+ stoplosses, cut sizing by configured multiplier
         loss_streak = int(state.get("consecutive_stoplosses", 0) or 0)
-        size_multiplier = 0.5 if loss_streak >= 2 else 1.0
+        loss_streak_mult = max(0.05, min(1.0, env_float("DT_LOSS_STREAK_SIZE_MULT", 0.5)))
+        size_multiplier = loss_streak_mult if loss_streak >= 2 else 1.0
         if reentry_mode:
             # loss-guard 해제 예외 진입은 기본보다 더 작게
             reentry_mult = max(0.05, min(1.0, env_float("DT_LOSS_GUARD_REENTRY_SIZE_MULT", 0.3)))
@@ -1090,6 +1104,9 @@ def run_once(dry_run: bool, confirm: str | None):
                     "peak_pnl_pct": 0.0,
                 })
             state["positions"] = positions
+            last_entry_by_symbol = state.get("last_entry_by_symbol") or {}
+            last_entry_by_symbol[symbol] = int(now_kst().timestamp())
+            state["last_entry_by_symbol"] = last_entry_by_symbol
             if reentry_mode:
                 state["loss_guard_reentry_count"] = int(state.get("loss_guard_reentry_count", 0) or 0) + 1
                 log_event("loss_guard_reentry_used", {
