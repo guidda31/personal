@@ -13,6 +13,8 @@ TARGET = os.getenv("AI_TREND_TARGET", "1261506890")
 CHANNEL = os.getenv("AI_TREND_CHANNEL", "telegram")
 ACCOUNT = os.getenv("AI_TREND_ACCOUNT", "telegram-bot-2")
 OPENCLAW_BIN = os.getenv("OPENCLAW_BIN", "/home/guidda/.nvm/versions/node/v22.22.0/bin/openclaw")
+NODE_BIN = os.getenv("NODE_BIN", "/home/guidda/.nvm/versions/node/v22.22.0/bin/node")
+OPENCLAW_ENTRY = os.getenv("OPENCLAW_ENTRY", "/home/guidda/.nvm/versions/node/v22.22.0/lib/node_modules/openclaw/openclaw.mjs")
 QUERIES = ["ai", "인공지능", "ai 에이전트", "생성형 ai", "llm"]
 
 STOPWORDS = {
@@ -24,16 +26,30 @@ STOPWORDS = {
 
 
 def send(msg: str):
-    subprocess.run(
-        [
-            OPENCLAW_BIN, "message", "send",
+    env = os.environ.copy()
+    env["PATH"] = f"/home/guidda/.nvm/versions/node/v22.22.0/bin:{env.get('PATH', '')}"
+
+    cmd = [
+        OPENCLAW_BIN, "message", "send",
+        "--channel", CHANNEL,
+        "--account", ACCOUNT,
+        "--target", TARGET,
+        "--message", msg,
+    ]
+    try:
+        subprocess.run(cmd, check=False, env=env)
+    except FileNotFoundError:
+        # cron PATH 이슈 대비: node로 openclaw 엔트리 직접 실행
+        fallback = [
+            NODE_BIN,
+            OPENCLAW_ENTRY,
+            "message", "send",
             "--channel", CHANNEL,
             "--account", ACCOUNT,
             "--target", TARGET,
             "--message", msg,
-        ],
-        check=False,
-    )
+        ]
+        subprocess.run(fallback, check=False, env=env)
 
 
 def tokenize(text: str) -> list[str]:
