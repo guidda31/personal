@@ -258,6 +258,32 @@ def load_today_stoploss_symbols(today: str) -> set[str]:
     return out
 
 
+def load_today_sold_symbols(today: str) -> set[str]:
+    out: set[str] = set()
+    if not TRADE_LOG_FILE.exists():
+        return out
+    try:
+        with TRADE_LOG_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if str(row.get("date", "")) != today:
+                    continue
+                if str(row.get("side", "")).upper() != "SELL":
+                    continue
+                sym = str(row.get("symbol", "")).strip()
+                if sym:
+                    out.add(sym)
+    except Exception:
+        return set()
+    return out
+
+
 def reconcile_positions_with_balance(client: KISClient, state: dict, today: str) -> bool:
     """Rebuild bot-managed positions from live holdings (+ bot trade history hints).
 
@@ -918,6 +944,10 @@ def run_once(dry_run: bool, confirm: str | None):
         block_after_stoploss = str(os.getenv("DT_BLOCK_REENTRY_AFTER_STOPLOSS", "1")).strip().lower() in {"1", "true", "yes", "y"}
         stopped_today = load_today_stoploss_symbols(today) if block_after_stoploss else set()
 
+        # same-day sold symbols can be blocked until market close (user safety preference)
+        block_after_any_sell = str(os.getenv("DT_BLOCK_REENTRY_AFTER_ANY_SELL", "1")).strip().lower() in {"1", "true", "yes", "y"}
+        sold_today = load_today_sold_symbols(today) if block_after_any_sell else set()
+
         profitable_held_symbols: set[str] = set()
         if allow_add_on:
             for p in (state.get("positions") or []):
@@ -936,6 +966,7 @@ def run_once(dry_run: bool, confirm: str | None):
 
         excluded_symbols = set(held_symbols if (prefer_div and not allow_add_on) else set())
         excluded_symbols.update(stopped_today)
+        excluded_symbols.update(sold_today)
 
         symbol, score, q, sel_theme = pick_top_symbol(
             client,
