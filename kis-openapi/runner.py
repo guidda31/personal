@@ -299,7 +299,9 @@ def reconcile_positions_with_balance(client: KISClient, state: dict, today: str)
         h = holdings.get(sym)
         if not h or sym in sell_ban:
             continue
-        qty = min(int(h.get("qty", 0)), int(oq))
+        # Live balance is the source of truth for executable quantity.
+        # Trade-history hints can undercount when partial fills/rejections drift.
+        qty = int(h.get("qty", 0))
         if qty <= 0:
             continue
         prev = prev_by_symbol.get(sym, {})
