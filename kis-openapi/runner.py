@@ -426,18 +426,19 @@ def _daily_trend_ok(client: KISClient, symbol: str) -> tuple[bool, str]:
         r = client.get_domestic_daily(symbol)
         rows = r.get("output") or r.get("output2") or []
         closes = [int(x.get("stck_clpr", "0") or 0) for x in rows if int(x.get("stck_clpr", "0") or 0) > 0]
-        if len(closes) < 20:
+        ma_period = max(20, env_int("DT_DAILY_MA_PERIOD", 20))
+        if len(closes) < ma_period:
             return False, "daily_insufficient"
         c = closes[0]
         ma5 = sum(closes[:5]) / 5.0
-        ma20 = sum(closes[:20]) / 20.0
+        ma_base = sum(closes[:ma_period]) / float(ma_period)
         max_ext_pct = max(1.0, env_float("DT_DAILY_MAX_EXT_PCT", 15.0))
-        if c < ma20:
-            return False, f"daily_below_ma20:{c}<{int(ma20)}"
-        if ma5 < ma20:
-            return False, f"daily_ma5_below_ma20:{int(ma5)}<{int(ma20)}"
-        if c > ma20 * (1.0 + max_ext_pct / 100.0):
-            return False, f"daily_overextended:{round((c/ma20-1)*100,2)}%"
+        if c < ma_base:
+            return False, f"daily_below_ma{ma_period}:{c}<{int(ma_base)}"
+        if ma5 < ma_base:
+            return False, f"daily_ma5_below_ma{ma_period}:{int(ma5)}<{int(ma_base)}"
+        if c > ma_base * (1.0 + max_ext_pct / 100.0):
+            return False, f"daily_overextended:{round((c/ma_base-1)*100,2)}%"
         return True, "ok"
     except Exception as e:
         return False, f"daily_error:{str(e)[:80]}"
