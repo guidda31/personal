@@ -726,7 +726,9 @@ def orderable_qty_for_symbol(client: KISClient, symbol: str) -> int:
 
 def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str | None, cfg) -> bool:
     """Run tp1/trail/stoploss checks even when entry path exits early."""
-    t = now_kst().time()
+    now = now_kst()
+    t = now.time()
+    today = now.strftime("%Y-%m-%d")
     if not is_continuous_session(t):
         return False
 
@@ -748,6 +750,12 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
         pnl = (cur - avg) / avg * 100
         prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
         sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
+        entry_date_s = str(p.get("entry_date") or today)
+        hold_days = 0
+        try:
+            hold_days = (dt.datetime.strptime(today, "%Y-%m-%d").date() - dt.datetime.strptime(entry_date_s, "%Y-%m-%d").date()).days + 1
+        except Exception:
+            hold_days = 0
         closed = False
 
         # tp1
@@ -775,14 +783,45 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
                     if qty <= 0:
                         closed = True
 
-        # trail
+        # tp2 (second partial take-profit)
+        tp2_enabled = str(os.getenv("DT_TP2_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
+        tp2_done = bool(p.get("tp2_done", False))
+        tp2_pct = env_float("DT_TP2_PCT", 8.0)
+        tp2_ratio = max(0.1, min(0.9, env_float("DT_TP2_SELL_RATIO", 0.35)))
+        if (not closed) and tp2_enabled and bool(p.get("tp1_done", False)) and (not tp2_done) and pnl >= tp2_pct:
+            sell_qty = min(qty, max(1, int(qty * tp2_ratio)))
+            if dry_run:
+                log_event("tp2_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
+                p["tp2_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("tp2_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, sell_qty, sell_price, reason="tp2", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    p["tp2_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    changed = True
+                    if qty <= 0:
+                        closed = True
+
+        # trail / breakeven
         peak = float(p.get("peak_pnl_pct", -999.0) or -999.0)
         peak = max(peak, pnl)
         p["peak_pnl_pct"] = round(peak, 4)
         trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
         trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
         pullback = peak - pnl
-        if (not closed) and trail_enabled and bool(p.get("tp1_done", False)) and pnl > 0 and pullback >= trail_gap:
+        min_hold_days = max(0, env_int("DT_MIN_HOLD_DAYS", 0))
+        be_enabled = str(os.getenv("DT_BREAKEVEN_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
+        be_arm = env_float("DT_BREAKEVEN_ARM_PCT", 2.0)
+        be_buffer = env_float("DT_BREAKEVEN_FEE_BUFFER_PCT", 0.1)
+        be_triggered = be_enabled and peak >= be_arm and pnl <= be_buffer
+        can_profit_exit = hold_days >= min_hold_days
+        if (not closed) and trail_enabled and bool(p.get("tp1_done", False)) and can_profit_exit and ((pnl > 0 and pullback >= trail_gap) or be_triggered):
             if dry_run:
                 log_event("trail_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "source": "entry_early_exit"}, notify=True)
                 closed = True
@@ -794,6 +833,23 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
                 ok = str((res or {}).get("rt_cd", "")) == "0"
                 if ok:
                     append_trade_history("SELL", symbol, qty, sell_price, reason="trail", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
+                    changed = True
+                    closed = True
+
+        # time-stop (stagnation cleanup for mid-term holdings)
+        time_stop_days = max(0, env_int("DT_TIME_STOP_DAYS", 0))
+        if (not closed) and time_stop_days > 0 and hold_days >= time_stop_days and pnl < tp1_pct:
+            if dry_run:
+                log_event("time_stop_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "hold_days": hold_days, "pnl_pct": round(pnl, 2), "source": "entry_early_exit"}, notify=True)
+                closed = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                log_event("time_stop_sell", {"symbol": symbol, "qty": qty, "result": res, "hold_days": hold_days, "pnl_pct": round(pnl, 2), "source": "entry_early_exit"}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history("SELL", symbol, qty, sell_price, reason="time_stop", order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "")
                     changed = True
                     closed = True
 
@@ -1235,7 +1291,13 @@ def run_once(dry_run: bool, confirm: str | None):
         prev_close = int(d.get("output", {}).get("stck_sdpr", "0") or 0)
         sell_price = clamp_order_price_by_krx_limit(cur, prev_close)
         defer_today = bool(p.get("defer_sell_next_day")) and p.get("entry_date") == today
-        log_event("monitor", {"symbol": symbol, "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today})
+        entry_date_s = str(p.get("entry_date") or today)
+        hold_days = 0
+        try:
+            hold_days = (dt.datetime.strptime(today, "%Y-%m-%d").date() - dt.datetime.strptime(entry_date_s, "%Y-%m-%d").date()).days + 1
+        except Exception:
+            hold_days = 0
+        log_event("monitor", {"symbol": symbol, "cur": cur, "avg": avg, "pnl_pct": round(pnl, 2), "sell_price": sell_price, "defer_today": defer_today, "hold_days": hold_days})
 
         # track best unrealized pnl for trailing exit
         prev_peak = float(p.get("peak_pnl_pct", -999.0) or -999.0)
@@ -1277,12 +1339,51 @@ def run_once(dry_run: bool, confirm: str | None):
                     if qty <= 0:
                         closed = True
 
-        # trailing profit protection (phase 2)
+        # second partial take-profit (phase 2)
+        tp2_enabled = str(os.getenv("DT_TP2_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
+        tp2_done = bool(p.get("tp2_done", False))
+        tp2_pct = env_float("DT_TP2_PCT", 8.0)
+        tp2_ratio = max(0.1, min(0.9, env_float("DT_TP2_SELL_RATIO", 0.35)))
+        if (not closed) and tp2_enabled and bool(p.get("tp1_done", False)) and (not tp2_done) and pnl >= tp2_pct and is_continuous_session(t):
+            sell_qty = max(1, int(qty * tp2_ratio))
+            sell_qty = min(sell_qty, qty)
+            if dry_run:
+                log_event("tp2_dry_run", {"symbol": symbol, "qty": sell_qty, "price": sell_price, "pnl_pct": round(pnl, 2)}, notify=True)
+                p["tp2_done"] = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=sell_qty, price=sell_price, ord_dvsn="00")
+                log_event("tp2_sell", {"symbol": symbol, "qty": sell_qty, "result": res, "pnl_pct": round(pnl, 2)}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history(
+                        "SELL", symbol, sell_qty, sell_price, reason="tp2",
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
+                    part_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    weight = sell_qty / max(1, qty)
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + (part_pnl_pct * weight)
+                    if part_pnl_pct > 0:
+                        state["consecutive_stoplosses"] = 0
+                    p["tp2_done"] = True
+                    p["qty"] = max(0, qty - sell_qty)
+                    qty = int(p["qty"])
+                    if qty <= 0:
+                        closed = True
+
+        # trailing profit protection (phase 3) + break-even protection
         trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
         trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
+        min_hold_days = max(0, env_int("DT_MIN_HOLD_DAYS", 0))
+        be_enabled = str(os.getenv("DT_BREAKEVEN_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
+        be_arm = env_float("DT_BREAKEVEN_ARM_PCT", 2.0)
+        be_buffer = env_float("DT_BREAKEVEN_FEE_BUFFER_PCT", 0.1)
         if (not closed) and trail_enabled and bool(p.get("tp1_done", False)) and is_continuous_session(t):
             pullback = peak - pnl
-            if pnl > 0 and pullback >= trail_gap:
+            be_triggered = be_enabled and peak >= be_arm and pnl <= be_buffer
+            can_profit_exit = hold_days >= min_hold_days
+            if can_profit_exit and ((pnl > 0 and pullback >= trail_gap) or be_triggered):
                 if dry_run:
                     log_event("trail_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "pnl_pct": round(pnl, 2), "peak_pnl_pct": round(peak, 2)}, notify=True)
                     closed = True
@@ -1302,6 +1403,29 @@ def run_once(dry_run: bool, confirm: str | None):
                         if trade_pnl_pct > 0:
                             state["consecutive_stoplosses"] = 0
                         closed = True
+
+        # time-stop (stagnation cleanup for mid-term holdings)
+        time_stop_days = max(0, env_int("DT_TIME_STOP_DAYS", 0))
+        if (not closed) and time_stop_days > 0 and hold_days >= time_stop_days and pnl < tp1_pct and is_continuous_session(t):
+            if dry_run:
+                log_event("time_stop_dry_run", {"symbol": symbol, "qty": qty, "price": sell_price, "hold_days": hold_days, "pnl_pct": round(pnl, 2)}, notify=True)
+                closed = True
+            else:
+                if cfg.mode == "real" and confirm != "REAL_ORDER":
+                    raise RuntimeError("real 실행은 --confirm REAL_ORDER 필요")
+                res = client.order_cash_sell(symbol=symbol, qty=qty, price=sell_price, ord_dvsn="00")
+                log_event("time_stop_sell", {"symbol": symbol, "qty": qty, "result": res, "hold_days": hold_days, "pnl_pct": round(pnl, 2)}, notify=True)
+                ok = str((res or {}).get("rt_cd", "")) == "0"
+                if ok:
+                    append_trade_history(
+                        "SELL", symbol, qty, sell_price, reason="time_stop",
+                        order_no=(res.get("output") or {}).get("ODNO", "") if isinstance(res, dict) else "",
+                    )
+                    trade_pnl_pct = ((sell_price - avg) / avg) * 100 if avg > 0 else 0.0
+                    state["realized_pnl_pct"] = float(state.get("realized_pnl_pct", 0.0)) + trade_pnl_pct
+                    if trade_pnl_pct > 0:
+                        state["consecutive_stoplosses"] = 0
+                    closed = True
 
         # partial stoploss stages
         sl1_pct = abs(env_float("DT_STOPLOSS_STAGE1_PCT", 2.5))
