@@ -16,8 +16,20 @@ if ! flock -n 9; then
   exit 0
 fi
 
-LOG_CHUNK="$(openclaw logs --plain --limit 500 2>/dev/null || true)"
+# Prefer direct gateway log file (works even when CLI RPC scope/token is unavailable in cron)
+LOG_FILE="/tmp/openclaw/openclaw-$(date +%F).log"
+LOG_CHUNK=""
+if [[ -f "$LOG_FILE" ]]; then
+  LOG_CHUNK="$(tail -n 2000 "$LOG_FILE" 2>/dev/null || true)"
+fi
+
+# Fallback to CLI logs API
 if [[ -z "$LOG_CHUNK" ]]; then
+  LOG_CHUNK="$(openclaw logs --plain --limit 2000 2>/dev/null || true)"
+fi
+
+if [[ -z "$LOG_CHUNK" ]]; then
+  echo "[$(date '+%F %T')] watchdog: no logs available" >> "$STATE_DIR/openclaw_auth_watchdog.log"
   exit 0
 fi
 
@@ -43,4 +55,8 @@ echo "$FINGERPRINT" > "$LAST_HASH_FILE"
 LAST_LINE="$(printf '%s\n' "$MATCHES" | tail -n 1)"
 MSG="🚨 OpenClaw 인증 끊김 감지 (Codex OAuth 실패)\n즉시 재인증 필요\n로그: ${LAST_LINE}"
 
-openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG" >/dev/null 2>&1 || true
+if openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG" >/dev/null 2>&1; then
+  echo "[$(date '+%F %T')] watchdog: alert sent" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+else
+  echo "[$(date '+%F %T')] watchdog: alert send failed" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+fi
