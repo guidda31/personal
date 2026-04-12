@@ -21,6 +21,7 @@ SUCCESS_MARKERS = [
     "Auth profile: openai-codex:default",
 ]
 CALLBACK_PREFIX = "http://localhost:1455/auth/callback"
+STATUS_CMD = ["openclaw", "models", "status", "--status-plain"]
 
 
 def click_any(page, labels):
@@ -87,6 +88,21 @@ def browser_flow(auth_url):
         return captured[-1]
 
 
+def auth_status_ok() -> bool:
+    try:
+        res = subprocess.run(
+            STATUS_CMD,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=os.environ.copy(),
+        )
+        out = (res.stdout or "") + "\n" + (res.stderr or "")
+        return "openai-codex:default ok expires in" in out
+    except Exception:
+        return False
+
+
 def main():
     os.environ.setdefault("DISPLAY", ":0")
     os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
@@ -142,9 +158,10 @@ def main():
                 break
 
         rc = proc.wait(timeout=5)
+        if not done and callback_sent and auth_status_ok():
+            done = True
+            rc = 0
         if not done:
-            if callback_sent:
-                raise SystemExit(rc or 1)
             raise SystemExit(rc or 1)
     finally:
         try:
