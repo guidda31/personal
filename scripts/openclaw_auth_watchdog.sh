@@ -6,6 +6,8 @@ set -euo pipefail
 # - Sends Telegram alert via OpenClaw message command (no model call required)
 
 TARGET_TELEGRAM_ID="1261506890"
+PREFERRED_ACCOUNT="telegram-bot-2"
+FALLBACK_ACCOUNT="default"
 LOCK_FILE="/tmp/openclaw_auth_watchdog.lock"
 STATE_DIR="/home/guidda/.openclaw/workspace/tmp"
 LAST_HASH_FILE="$STATE_DIR/openclaw_auth_watchdog.last"
@@ -58,16 +60,22 @@ MSG="🚨 OpenClaw 인증 끊김 감지 (Codex OAuth 실패)\n즉시 재인증 �
 SEND_LOG="$STATE_DIR/openclaw_auth_watchdog.send.log"
 
 send_alert() {
-  openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG"
+  local account="$1"
+  echo "[$(date '+%F %T')] send attempt via account=${account}" >> "$SEND_LOG"
+  if [[ "$account" == "default" ]]; then
+    openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG"
+  else
+    openclaw message send --channel telegram --account "$account" --target "$TARGET_TELEGRAM_ID" --message "$MSG"
+  fi
 }
 
-if send_alert >>"$SEND_LOG" 2>&1; then
-  echo "[$(date '+%F %T')] watchdog: alert sent" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+if send_alert "$PREFERRED_ACCOUNT" >>"$SEND_LOG" 2>&1; then
+  echo "[$(date '+%F %T')] watchdog: alert sent via $PREFERRED_ACCOUNT" >> "$STATE_DIR/openclaw_auth_watchdog.log"
 else
   sleep 3
-  if send_alert >>"$SEND_LOG" 2>&1; then
-    echo "[$(date '+%F %T')] watchdog: alert sent on retry" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+  if send_alert "$FALLBACK_ACCOUNT" >>"$SEND_LOG" 2>&1; then
+    echo "[$(date '+%F %T')] watchdog: alert sent via $FALLBACK_ACCOUNT (fallback)" >> "$STATE_DIR/openclaw_auth_watchdog.log"
   else
-    echo "[$(date '+%F %T')] watchdog: alert send failed (see $SEND_LOG)" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+    echo "[$(date '+%F %T')] watchdog: alert send failed (preferred=$PREFERRED_ACCOUNT fallback=$FALLBACK_ACCOUNT; see $SEND_LOG)" >> "$STATE_DIR/openclaw_auth_watchdog.log"
   fi
 fi
