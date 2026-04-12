@@ -7,7 +7,7 @@ import time
 
 PROFILE_DIR = Path("/home/guidda/.openclaw/workspace/tmp/pw-openai-auth-profile")
 CHROME = "/home/guidda/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"
-TARGET_URL = "https://auth.openai.com/log-in"
+TARGET_URL = "https://chatgpt.com/auth/login"
 
 running = True
 
@@ -27,9 +27,11 @@ with sync_playwright() as p:
         user_data_dir=str(PROFILE_DIR),
         executable_path=CHROME,
         headless=False,
+        ignore_default_args=["--enable-automation"],
         args=[
             "--no-first-run",
             "--no-default-browser-check",
+            "--disable-blink-features=AutomationControlled",
         ],
     )
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
