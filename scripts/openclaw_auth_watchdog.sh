@@ -53,10 +53,21 @@ fi
 echo "$FINGERPRINT" > "$LAST_HASH_FILE"
 
 LAST_LINE="$(printf '%s\n' "$MATCHES" | tail -n 1)"
-MSG="🚨 OpenClaw 인증 끊김 감지 (Codex OAuth 실패)\n즉시 재인증 필요\n로그: ${LAST_LINE}"
+SHORT_LINE="$(printf '%s' "$LAST_LINE" | tr '\n' ' ' | tail -c 700)"
+MSG="🚨 OpenClaw 인증 끊김 감지 (Codex OAuth 실패)\n즉시 재인증 필요\n로그: ${SHORT_LINE}"
+SEND_LOG="$STATE_DIR/openclaw_auth_watchdog.send.log"
 
-if openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG" >/dev/null 2>&1; then
+send_alert() {
+  openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$MSG"
+}
+
+if send_alert >>"$SEND_LOG" 2>&1; then
   echo "[$(date '+%F %T')] watchdog: alert sent" >> "$STATE_DIR/openclaw_auth_watchdog.log"
 else
-  echo "[$(date '+%F %T')] watchdog: alert send failed" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+  sleep 3
+  if send_alert >>"$SEND_LOG" 2>&1; then
+    echo "[$(date '+%F %T')] watchdog: alert sent on retry" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+  else
+    echo "[$(date '+%F %T')] watchdog: alert send failed (see $SEND_LOG)" >> "$STATE_DIR/openclaw_auth_watchdog.log"
+  fi
 fi
