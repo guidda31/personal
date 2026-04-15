@@ -48,9 +48,13 @@ def fetch_text(url: str, encoding: str = "euc-kr") -> str:
     return b.decode(encoding, "ignore")
 
 
+ETF_NAME_KEYWORDS = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "RISE", "PLUS", "ETN", "레버리지", "인버스"]
+ETF_THEME_HINTS = {"etf", "etn", "index_etf", "value_etf"}
+
+
 def top_volume_symbols(limit: int = 30) -> list[dict]:
     out = []
-    etf_kw = ["KODEX", "TIGER", "KOSEF", "ARIRANG", "KBSTAR", "HANARO", "ACE", "SOL", "ETN", "레버리지", "인버스"]
+    etf_kw = ETF_NAME_KEYWORDS
     # basic KRX hygiene filters by name
     bad_name_kw = ["스팩", "SPAC", "우", "우B", "우선주", "관리", "정리매매", "거래정지"]
     for sosok in ("0", "1"):
@@ -418,6 +422,33 @@ def infer_theme(symbol: str, name: str) -> str:
     return "general"
 
 
+def is_etf_like_name(name: str) -> bool:
+    u = str(name or "").upper()
+    return any(kw.upper() in u for kw in ETF_NAME_KEYWORDS)
+
+
+def balance_name_map(balance: dict) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for row in (balance.get("output1") or []):
+        symbol = str(row.get("pdno", "")).strip()
+        name = str(row.get("prdt_name", "")).strip()
+        if symbol and name:
+            out[symbol] = name
+    return out
+
+
+def exit_profile_for_position(p: dict, live_name: str = "") -> dict:
+    theme = str(p.get("theme", "") or "").strip().lower()
+    stored_name = str(p.get("name", "") or "").strip()
+    is_etf = is_etf_like_name(stored_name) or is_etf_like_name(live_name) or (theme in ETF_THEME_HINTS)
+    return {
+        "profile": "etf" if is_etf else "default",
+        "tp2_pct": env_float("DT_ETF_TP2_PCT", env_float("DT_TP2_PCT", 8.0)) if is_etf else env_float("DT_TP2_PCT", 8.0),
+        "trail_gap": max(0.2, env_float("DT_ETF_TRAIL_GAP_PCT", env_float("DT_TRAIL_GAP_PCT", 1.2))) if is_etf else max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2)),
+        "min_hold_days": max(0, env_int("DT_ETF_MIN_HOLD_DAYS", env_int("DT_MIN_HOLD_DAYS", 0))) if is_etf else max(0, env_int("DT_MIN_HOLD_DAYS", 0)),
+    }
+
+
 def _daily_trend_ok(client: KISClient, symbol: str) -> tuple[bool, str]:
     enabled = str(os.getenv("DT_DAILY_TREND_FILTER", "1")).strip().lower() in {"1", "true", "yes", "y"}
     if not enabled:
@@ -734,12 +765,18 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
 
     changed = False
     updated_positions = []
+    live_name_lookup = balance_name_map(client.get_balance())
     for p in (state.get("positions") or []):
         symbol = str(p.get("symbol", "")).strip()
         qty = int(p.get("qty", 0) or 0)
         avg = int(p.get("avg_price", 0) or 0)
         if not symbol or qty <= 0 or avg <= 0:
             continue
+
+        live_name = str(p.get("name") or live_name_lookup.get(symbol) or "").strip()
+        if live_name and (not p.get("name")):
+            p["name"] = live_name
+        exit_profile = exit_profile_for_position(p, live_name)
 
         d = client.get_domestic_quote(symbol)
         cur = int(d.get("output", {}).get("stck_prpr", "0") or 0)
@@ -786,7 +823,7 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
         # tp2 (second partial take-profit)
         tp2_enabled = str(os.getenv("DT_TP2_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
         tp2_done = bool(p.get("tp2_done", False))
-        tp2_pct = env_float("DT_TP2_PCT", 8.0)
+        tp2_pct = exit_profile["tp2_pct"]
         tp2_ratio = max(0.1, min(0.9, env_float("DT_TP2_SELL_RATIO", 0.35)))
         if (not closed) and tp2_enabled and bool(p.get("tp1_done", False)) and (not tp2_done) and pnl >= tp2_pct:
             sell_qty = min(qty, max(1, int(qty * tp2_ratio)))
@@ -813,9 +850,9 @@ def quick_exit_check(client: KISClient, state: dict, dry_run: bool, confirm: str
         peak = max(peak, pnl)
         p["peak_pnl_pct"] = round(peak, 4)
         trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
-        trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
+        trail_gap = exit_profile["trail_gap"]
         pullback = peak - pnl
-        min_hold_days = max(0, env_int("DT_MIN_HOLD_DAYS", 0))
+        min_hold_days = exit_profile["min_hold_days"]
         be_enabled = str(os.getenv("DT_BREAKEVEN_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
         be_arm = env_float("DT_BREAKEVEN_ARM_PCT", 2.0)
         be_buffer = env_float("DT_BREAKEVEN_FEE_BUFFER_PCT", 0.1)
@@ -1268,6 +1305,7 @@ def run_once(dry_run: bool, confirm: str | None):
     # 2) Risk/exit monitor (multi-position)
     positions = state.get("positions") or []
     updated_positions = []
+    live_name_lookup = balance_name_map(client.get_balance())
     exit_start = env_time("DT_EXIT_START", "15:15")
     exit_end = env_time("DT_EXIT_END", "15:20")
     exit_retry_end = env_time("DT_EOD_RETRY_END", "15:30")
@@ -1280,6 +1318,11 @@ def run_once(dry_run: bool, confirm: str | None):
         avg = int(p.get("avg_price", 0) or 0)
         if not symbol or qty <= 0 or avg <= 0:
             continue
+
+        live_name = str(p.get("name") or live_name_lookup.get(symbol) or "").strip()
+        if live_name and (not p.get("name")):
+            p["name"] = live_name
+        exit_profile = exit_profile_for_position(p, live_name)
 
         d = client.get_domestic_quote(symbol)
         cur = int(d.get("output", {}).get("stck_prpr", "0") or 0)
@@ -1342,7 +1385,7 @@ def run_once(dry_run: bool, confirm: str | None):
         # second partial take-profit (phase 2)
         tp2_enabled = str(os.getenv("DT_TP2_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
         tp2_done = bool(p.get("tp2_done", False))
-        tp2_pct = env_float("DT_TP2_PCT", 8.0)
+        tp2_pct = exit_profile["tp2_pct"]
         tp2_ratio = max(0.1, min(0.9, env_float("DT_TP2_SELL_RATIO", 0.35)))
         if (not closed) and tp2_enabled and bool(p.get("tp1_done", False)) and (not tp2_done) and pnl >= tp2_pct and is_continuous_session(t):
             sell_qty = max(1, int(qty * tp2_ratio))
@@ -1374,8 +1417,8 @@ def run_once(dry_run: bool, confirm: str | None):
 
         # trailing profit protection (phase 3) + break-even protection
         trail_enabled = str(os.getenv("DT_TRAIL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "y"}
-        trail_gap = max(0.2, env_float("DT_TRAIL_GAP_PCT", 1.2))
-        min_hold_days = max(0, env_int("DT_MIN_HOLD_DAYS", 0))
+        trail_gap = exit_profile["trail_gap"]
+        min_hold_days = exit_profile["min_hold_days"]
         be_enabled = str(os.getenv("DT_BREAKEVEN_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "y"}
         be_arm = env_float("DT_BREAKEVEN_ARM_PCT", 2.0)
         be_buffer = env_float("DT_BREAKEVEN_FEE_BUFFER_PCT", 0.1)
