@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+OPENCLAW_BIN="${OPENCLAW_BIN:-/home/guidda/.nvm/versions/node/v22.22.0/bin/openclaw}"
 TARGET_TELEGRAM_ID="1261506890"
 PREFERRED_ACCOUNT="telegram-bot-2"
 FALLBACK_ACCOUNT="default"
@@ -20,9 +21,9 @@ send_alert() {
   local account="$2"
   echo "[$(date '+%F %T')] send attempt via account=${account}" >> "$SEND_LOG"
   if [[ "$account" == "default" ]]; then
-    openclaw message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$msg"
+    "$OPENCLAW_BIN" message send --channel telegram --target "$TARGET_TELEGRAM_ID" --message "$msg"
   else
-    openclaw message send --channel telegram --account "$account" --target "$TARGET_TELEGRAM_ID" --message "$msg"
+    "$OPENCLAW_BIN" message send --channel telegram --account "$account" --target "$TARGET_TELEGRAM_ID" --message "$msg"
   fi
 }
 
