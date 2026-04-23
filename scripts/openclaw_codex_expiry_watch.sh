@@ -54,10 +54,10 @@ try:
         stage = "expired"
     elif days_left <= 0:
         stage = "d0"
-    elif days_left == 1:
-        stage = "d1"
     elif days_left == 2:
         stage = "d2"
+    elif days_left == 3:
+        stage = "d3"
     else:
         stage = "none"
 
@@ -101,11 +101,11 @@ if [[ "$LAST_KEY" == "$CURRENT_KEY" ]]; then
 fi
 
 case "$STAGE" in
-  d2)
-    MSG="⏰ Codex 인증 만료 2일 전\n만료 예정: ${EXPIRES_KST}\n자동 갱신 신뢰가 낮아 미리 재인증 권장"
+  d3)
+    MSG="⏰ Codex 인증 만료 3일 전\n만료 예정: ${EXPIRES_KST}\n미리 재인증 준비 권장"
     ;;
-  d1)
-    MSG="⚠️ Codex 인증 만료 1일 전\n만료 예정: ${EXPIRES_KST}\n오늘 안에 재인증 권장"
+  d2)
+    MSG="⚠️ Codex 인증 만료 2일 전\n만료 예정: ${EXPIRES_KST}\n자동 갱신 신뢰가 낮아 미리 재인증 권장"
     ;;
   d0)
     MSG="🚨 Codex 인증 오늘 만료 예정\n만료 예정: ${EXPIRES_KST}\n지금 재인증 권장"
